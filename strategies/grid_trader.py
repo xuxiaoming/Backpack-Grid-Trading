@@ -149,7 +149,7 @@ class GridTrader:
         if self.ws.connected:
             logger.info("WebSocket连接已建立，开始初始化数据流")
 
-            # 尝试初始化订单簿最多3次
+            # 强制重新初始化订单簿最多3次
             orderbook_initialized = False
             retry_count = 0
             while retry_count < 3 and not orderbook_initialized:
@@ -159,11 +159,6 @@ class GridTrader:
                     time.sleep(1)
                 retry_count += 1
 
-            if not orderbook_initialized:
-                logger.error("订单簿初始化多次失败，跳过订阅步骤")
-                return False
-
-            # 订阅行情数据
             ticker_subscribed = False
             retry_count = 0
             while retry_count < 3 and not ticker_subscribed:
@@ -173,7 +168,6 @@ class GridTrader:
                     time.sleep(1)
                 retry_count += 1
 
-            # 订阅深度数据
             depth_subscribed = False
             retry_count = 0
             while retry_count < 3 and not depth_subscribed:
@@ -183,10 +177,9 @@ class GridTrader:
                     time.sleep(1)
                 retry_count += 1
 
-            # 订阅私有订单更新
+            stream = f"account.orderUpdate.{self.symbol}"
             order_update_subscribed = False
             retry_count = 0
-            stream = f"account.orderUpdate.{self.symbol}"
             while retry_count < 3 and not order_update_subscribed:
                 order_update_subscribed = self.subscribe_order_updates()
                 if not order_update_subscribed:
@@ -194,15 +187,24 @@ class GridTrader:
                     time.sleep(1)
                 retry_count += 1
 
-            if ticker_subscribed and depth_subscribed and order_update_subscribed:
+            # 新增：关键数据流是否都初始化成功
+            all_initialized = (
+                orderbook_initialized and
+                ticker_subscribed and
+                depth_subscribed and
+                order_update_subscribed
+            )
+
+            if all_initialized:
                 logger.info("所有必要数据流已成功订阅")
                 return True
             else:
-                logger.warning("部分数据流订阅失败，策略仍将继续运行")
+                logger.warning("部分数据流未完全恢复，但继续运行以尝试自动补单")
                 return False
         else:
             logger.warning("WebSocket连接建立超时，将在运行过程中继续尝试连接")
             return False
+
     
     def _load_trading_stats(self):
         """從數據庫加載交易統計數據"""
@@ -1816,6 +1818,7 @@ class GridTrader:
 
 
             if connection_status:
+                self._ensure_data_streams()
                 # 初始化訂單簿和數據流
                 if not self.ws.orderbook["bids"] and not self.ws.orderbook["asks"]:
                     self.ws.initialize_orderbook()
