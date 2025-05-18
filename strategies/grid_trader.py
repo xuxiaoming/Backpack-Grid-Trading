@@ -16,6 +16,8 @@ from database.db import Database
 from utils.helpers import round_to_precision, round_to_tick_size, calculate_volatility
 from logger import setup_logger
 
+import numpy as np
+
 
 
 logger = setup_logger("grid_trader")
@@ -32,9 +34,10 @@ class GridTrader:
         grid_num=10,           # 網格數量
         order_quantity=None,    # 每格訂單數量
         auto_price_range=True,  # 自動設置價格範圍
-        price_range_percent=5.0, # 自動模式下的價格範圍百分比
+        price_range_percent=9.0, # 自動模式下的價格範圍百分比
         ws_proxy=None,
-        max_position=0.5       # 最大持倉量限制
+        max_position=0.5,  #最大持倉量限制
+        grid_spacing= None #最大持倉量限制 网格策略参数
     ):
         self.api_key = api_key
         self.secret_key = secret_key
@@ -46,6 +49,7 @@ class GridTrader:
         self.grid_upper_price = grid_upper_price
         self.grid_lower_price = grid_lower_price
         self.max_position = max_position
+        self.grid_spacing = grid_spacing
         
         # 網格交易狀態
         self.grid_initialized = False
@@ -134,6 +138,7 @@ class GridTrader:
         logger.info(f"基礎精度: {self.base_precision}, 報價精度: {self.quote_precision}")
         logger.info(f"最小訂單大小: {self.min_order_size}, 價格步長: {self.tick_size}")
         logger.info(f"網格數量: {self.grid_num}")
+        logger.info(f"网络策略: {self.grid_spacing}")
         logger.info(f"最大持倉限制: {self.max_position} {self.base_asset}")
 
     def _initialize_websocket(self):
@@ -674,6 +679,10 @@ class GridTrader:
                 next_price = price
                 break
 
+        if  next_price in self.grid_sell_orders_by_price:
+            logger.info(f"價格 {next_price} 已有訂單，跳過補單")
+            return
+
         if next_price:
             logger.info(f"在網格點位 {next_price} 放置賣單 (買入價格: {executed_price})")
             
@@ -770,7 +779,10 @@ class GridTrader:
             if price < grid_price:
                 next_price = price
                 break
-        
+        if next_price in self.grid_buy_orders_by_price :
+            logger.info(f"價格 {next_price} 已有訂單，跳過補單")
+            return
+
         if next_price:
             logger.info(f"在網格點位 {next_price} 放置買單 (賣出價格: {executed_price})")
             
@@ -1133,7 +1145,82 @@ class GridTrader:
         
         logger.info(f"計算得出 {len(grid_levels)} 個網格點位: {grid_levels[0]} - {grid_levels[-1]}")
         return grid_levels
-    
+    def calculate_expanding_grid_levels(self, expansion_factor=1.02):
+        """生成指数扩大的网格点"""
+        current_price = self.get_current_price()
+        if current_price is None:
+            logger.error("無法獲取當前價格，無法計算網格")
+            return []
+
+        if self.auto_price_range or (self.grid_upper_price is None or self.grid_lower_price is None):
+            price_range_ratio = self.price_range_percent / 100
+            self.grid_upper_price = round_to_tick_size(current_price * (1 + price_range_ratio), self.tick_size)
+            self.grid_lower_price = round_to_tick_size(current_price * (1 - price_range_ratio), self.tick_size)
+
+        num_points = self.grid_num + 1
+        grid_levels = [current_price]
+
+        # 向上构建
+        price = current_price
+        for _ in range(self.grid_num // 2):
+            price = round_to_tick_size(price * expansion_factor, self.tick_size)
+            if price > self.grid_upper_price:
+                break
+            grid_levels.append(price)
+
+        # 向下构建
+        price = current_price
+        for _ in range(self.grid_num // 2):
+            price = round_to_tick_size(price / expansion_factor, self.tick_size)
+            if price < self.grid_lower_price:
+                break
+            grid_levels.insert(0, price)
+
+        return sorted(list(set(grid_levels)))[:self.grid_num+1]
+
+    def calculate_liquidity_adaptive_grid_levels(self):
+        """根据市场深度生成网格点"""
+        current_price = self.get_current_price()
+        order_book = get_order_book(self.symbol)
+        if not order_book or "bids" not in order_book or "asks" not in order_book:
+            return self.calculate_grid_levels()  # fallback to uniform grid
+
+        bids = order_book["bids"]
+        asks = order_book["asks"]
+
+        # 获取最近的价格分布
+        bid_prices = [float(bid[0]) for bid in bids[:self.grid_num//2]]
+        ask_prices = [float(ask[0]) for ask in asks[:self.grid_num//2]]
+
+        # 去重并排序
+        adaptive_levels = sorted(list(set(bid_prices + ask_prices)))
+
+        if len(adaptive_levels) < self.grid_num:
+            # 如果不足，补充基于当前价的对称网格
+            extra = self.grid_num - len(adaptive_levels)
+            mid = current_price
+            lower_levels = [mid - i * self.tick_size * 2 for i in range(extra//2)]
+            upper_levels = [mid + i * self.tick_size * 2 for i in range(extra//2)]
+            adaptive_levels = sorted(lower_levels + adaptive_levels + upper_levels)
+
+        return adaptive_levels
+
+
+    def calculate_gaussian_grid_levels(self, std_dev=None):
+        """基于正态分布生成网格点"""
+        current_price = self.get_current_price()
+        if current_price is None:
+            logger.error("無法獲取當前價格，無法計算網格")
+            return []
+
+        if std_dev is None:
+            std_dev = calculate_volatility(self.ws.historical_prices)  # 获取波动率估计值
+
+        grid_steps = np.linspace(-std_dev * 2, std_dev * 2, self.grid_num)
+        grid_levels = [round_to_tick_size(current_price + step, self.tick_size) for step in grid_steps]
+        return sorted(grid_levels)
+
+
     def subscribe_order_updates(self):
         """訂閲訂單更新流"""
         if not self.ws or not self.ws.is_connected():
@@ -1174,7 +1261,16 @@ class GridTrader:
         logger.info("開始初始化網格交易...")
         
         # 計算網格價格點位
-        self.grid_levels = self.calculate_grid_levels()
+        if self.grid_spacing == 'uniform':
+            self.grid_levels = self.calculate_grid_levels()
+        elif self.grid_spacing == 'expanding':
+            self.grid_levels = self.calculate_expanding_grid_levels(expansion_factor=1.05)
+        elif self.grid_spacing == 'gaussian':
+            self.grid_levels = self.calculate_gaussian_grid_levels(std_dev=0.8)
+        elif self.grid_spacing == 'liquidity':
+            self.grid_levels = self.calculate_liquidity_adaptive_grid_levels()
+        else:
+            self.grid_levels = self.calculate_grid_levels()
         if not self.grid_levels:
             logger.error("無法計算網格點位，初始化失敗")
             return False
@@ -1406,6 +1502,12 @@ class GridTrader:
                     dependent_price = self.grid_dependencies[price]
                     logger.info(f"價格點位 {price} 的買單依賴於價位 {dependent_price} 的賣單成交，暫不補充")
                     continue
+
+                    # 新增：检查该价格是否已有订单
+                    existing_orders = self.grid_buy_orders_by_price.get(price, [])
+                    if any(order['price'] == price for order in existing_orders):
+                        logger.info(f"價格 {price} 已有买单一筆，跳过补单")
+                        continue
                 
                 # 此網格點位沒有買單，需要補充
                 orders_to_place.append({

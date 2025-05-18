@@ -60,6 +60,9 @@ def parse_arguments():
     parser.add_argument('--fee-rate', type=float, default=0.1, help='Maker手續費率百分比 (默認: 0.1)')
     parser.add_argument('--risk', type=str, choices=['low', 'medium', 'high'], default='medium', 
                         help='風險等級 (low/medium/high, 默認: medium)')
+    parser.add_argument('--grid-spacing', type=str, default='uniform',
+                        choices=['uniform', 'gaussian', 'expanding', 'liquidity'],
+                        help='网格点位分布类型 uniform等分 gaussian高斯  expanding 对数 liquidity 指数')
 
     return parser.parse_args()
 
@@ -175,7 +178,8 @@ def main():
                 order_quantity=args.quantity,
                 auto_price_range=args.auto_price,
                 price_range_percent=args.price_range,
-                ws_proxy=ws_proxy
+                ws_proxy=ws_proxy,
+                grid_spacing=args.grid_spacing
             )
             
             # 執行網格交易策略
