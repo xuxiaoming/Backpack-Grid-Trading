@@ -143,17 +143,7 @@ class BackpackWebSocket:
             "subscriptions": self.subscriptions
         }
 
-    def _heartbeat_check(self):
-        """定期檢查WebSocket連接狀態並在需要時重連"""
-        while self.running:
-            current_time = time.time()
-            time_since_last_heartbeat = current_time - self.last_heartbeat
-            
-            if time_since_last_heartbeat > self.heartbeat_interval * 2:
-                logger.warning(f"心跳檢測超時 ({time_since_last_heartbeat:.1f}秒)，嘗試重新連接")
-                self.reconnect()
-                
-            time.sleep(5)  # 每5秒檢查一次
+
 
     def connect(self):
         """建立WebSocket连接"""
@@ -223,11 +213,17 @@ class BackpackWebSocket:
     def reconnect(self):
         """完全斷開並重新建立WebSocket連接"""
         with self.ws_lock:
+            logger.info("正在嘗試重新連接...")
+            if self.connected or (self.ws_thread and self.ws_thread.is_alive()):
+                logger.warning("WebSocket already connected or connecting, skipping redundant call.")
+                return
+
             if not self.running:
                 logger.warning("WebSocket客户端已停止，不再尝试重连")
                 return False
 
             # 即使超过最大尝试次数，也应继续尝试，但限制频率
+            logger.debug("尝试重新连接")
             if self.reconnect_attempts >= self.max_reconnect_attempts:
                 delay = min(self.reconnect_delay * (self.reconnect_attempts % self.max_reconnect_attempts + 1),
                             self.max_reconnect_delay)
@@ -240,6 +236,7 @@ class BackpackWebSocket:
                 time.sleep(delay)
 
             # 清理当前的ws和sock对象
+            logger.debug("清理旧的WebSocket连接")
             try:
                 if self.ws:
                     self.ws.keep_running = False
