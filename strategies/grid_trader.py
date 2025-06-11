@@ -401,75 +401,91 @@ class GridTrader:
             logger.info(f"計算得出已實現利潤: {self.total_profit:.8f} {self.quote_asset}")
             logger.info(f"總手續費: {self.total_fees:.8f} {self.quote_asset}")
 
-    def check_ws_connection(self, max_reconnect_attempts=5, reconnect_delay=3):
-        """
-        检查并恢复WebSocket连接。
-        返回是否连接成功。
-        """
+
+
+    def _async_reconnect(self):
+        """在后台线程中执行WebSocket重连逻辑"""
+
+        def reconnect_task():
+            max_attempts = 5
+            attempt = 0
+
+            while attempt < max_attempts:
+                logger.info(f"第 {attempt + 1} 次尝试重建WebSocket连接（后台）")
+                try:
+                    # 关闭旧连接（如果存在）
+                    logger.info("正在关闭旧WebSocket连接（后台）")
+                    if self.ws:
+                        try:
+                            self.ws.close()
+                        except Exception as e:
+                            logger.error(f"关闭旧WebSocket连接时出错: {e}")
+                        finally:
+                            self.ws = None
+
+                    # 创建新连接
+                    logger.info("正在创建新WebSocket连接（后台）")
+                    self.ws = BackpackWebSocket(
+                        self.api_key,
+                        self.secret_key,
+                        self.symbol,
+                        self.on_ws_message,
+                        auto_reconnect=True,
+                        proxy=self.ws_proxy
+                    )
+                    self.ws.connect()
+
+                    logger.info("正在等待WebSocket连接建立...")
+                    # 等待连接建立
+                    wait_time = 0
+                    while wait_time < 5:
+                        if self.ws.is_connected():
+                            logger.info("WebSocket连接已建立，开始初始化数据流...")
+
+                            logger.info("正在初始化订单簿...")
+                            # 初始化订单簿并订阅关键数据流
+                            orderbook_initialized = False
+                            retry = 0
+                            while retry < 3:
+                                orderbook_initialized = self.ws.initialize_orderbook()
+                                if orderbook_initialized:
+                                    break
+                                time.sleep(1)
+                                retry += 1
+
+                            depth_subscribed = self.ws.subscribe_depth()
+                            ticker_subscribed = self.ws.subscribe_bookTicker()
+                            order_update_subscribed = self.subscribe_order_updates()
+
+                            if orderbook_initialized and depth_subscribed and ticker_subscribed and order_update_subscribed:
+                                logger.info("WebSocket连接及数据流恢复成功")
+                                return
+                            else:
+                                logger.warning("部分数据流恢复失败，准备重试...")
+                        time.sleep(1)
+                        wait_time += 1
+
+                    attempt += 1
+                    logger.warning(f"第 {attempt} 次后台重连失败，准备再次尝试...")
+
+                except Exception as e:
+                    logger.error(f"重建WebSocket连接时发生异常: {e}")
+                    attempt += 1
+                    time.sleep(3)
+
+            logger.error("无法恢复WebSocket连接，请检查网络状态或API密钥有效性")
+
+        # 启动后台线程
+        thread = threading.Thread(target=reconnect_task, daemon=True)
+        thread.start()
+
+    def check_ws_connection(self):
+        """检查WebSocket连接状态，并在必要时异步重连"""
         if self.ws and self.ws.is_connected():
             return True
 
-        logger.warning("WebSocket连接断开或不可用，尝试重新连接...")
-
-        # 先关闭可能存在的旧连接
-        if self.ws:
-            try:
-                self.ws.close()
-                time.sleep(0.5)
-            except Exception as e:
-                logger.error(f"关闭旧WebSocket连接时出错: {e}")
-
-        attempt = 0
-        while attempt < max_reconnect_attempts:
-            try:
-                logger.info(f"第 {attempt + 1} 次尝试重建WebSocket连接")
-                self.ws = BackpackWebSocket(
-                    self.api_key,
-                    self.secret_key,
-                    self.symbol,
-                    self.on_ws_message,
-                    auto_reconnect=True,
-                    proxy=self.ws_proxy
-                )
-                self.ws.connect()
-
-                # 等待连接建立
-                wait_time = 0
-                while wait_time < 5:
-                    if self.ws.is_connected():
-                        logger.info("WebSocket连接已建立，开始初始化数据流...")
-
-                        # 初始化订单簿并订阅关键数据流
-                        orderbook_initialized = False
-                        retry = 0
-                        while retry < 3:
-                            orderbook_initialized = self.ws.initialize_orderbook()
-                            if orderbook_initialized:
-                                break
-                            time.sleep(1)
-                            retry += 1
-
-                        depth_subscribed = self.ws.subscribe_depth()
-                        ticker_subscribed = self.ws.subscribe_bookTicker()
-                        order_update_subscribed = self.subscribe_order_updates()
-
-                        if orderbook_initialized and depth_subscribed and ticker_subscribed and order_update_subscribed:
-                            logger.info("WebSocket连接及数据流恢复成功")
-                            return True
-                        else:
-                            logger.warning("部分数据流恢复失败，准备重试...")
-                    time.sleep(reconnect_delay)
-                    wait_time += reconnect_delay
-
-                attempt += 1
-                logger.warning(f"第 {attempt} 次重连失败，准备再次尝试...")
-
-            except Exception as e:
-                logger.error(f"重建WebSocket连接时发生异常: {e}")
-                attempt += 1
-                time.sleep(reconnect_delay)
-
-        logger.error("无法恢复WebSocket连接，请检查网络状态或API密钥有效性")
+        logger.warning("WebSocket连接断开或不可用，将在后台尝试异步重连")
+        self._async_reconnect()  # 异步重连
         return False
 
     def on_ws_message(self, stream, data):
