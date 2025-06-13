@@ -401,83 +401,64 @@ class GridTrader:
             logger.info(f"計算得出已實現利潤: {self.total_profit:.8f} {self.quote_asset}")
             logger.info(f"總手續費: {self.total_fees:.8f} {self.quote_asset}")
 
+    def ws_re_connection(self):
+        """檢查並恢復WebSocket連接"""
+        ws_connected = self.ws and self.ws.is_connected()
 
+        if not ws_connected:
+            logger.warning("WebSocket連接已斷開或不可用，嘗試重新連接...")
 
-    def _async_reconnect(self):
-        """在后台线程中执行WebSocket重连逻辑"""
-
-        def reconnect_task():
-            max_attempts = 5
-            attempt = 0
-
-            while attempt < max_attempts:
-                logger.info(f"第 {attempt + 1} 次尝试重建WebSocket连接（后台）")
+            # 嘗試關閉現有連接
+            if self.ws:
                 try:
-                    # 关闭旧连接（如果存在）
-                    logger.info("正在关闭旧WebSocket连接（后台）")
-                    if self.ws:
+                    if hasattr(self.ws, 'running') and self.ws.running:
+                        self.ws.running = False
+                    if hasattr(self.ws, 'ws') and self.ws.ws:
                         try:
-                            self.ws.close()
-                        except Exception as e:
-                            logger.error(f"关闭旧WebSocket连接时出错: {e}")
-                        finally:
-                            self.ws = None
-
-                    # 创建新连接
-                    logger.info("正在创建新WebSocket连接（后台）")
-                    self.ws = BackpackWebSocket(
-                        self.api_key,
-                        self.secret_key,
-                        self.symbol,
-                        self.on_ws_message,
-                        auto_reconnect=True,
-                        proxy=self.ws_proxy
-                    )
-                    self.ws.connect()
-
-                    logger.info("正在等待WebSocket连接建立...")
-                    # 等待连接建立
-                    wait_time = 0
-                    while wait_time < 5:
-                        if self.ws.is_connected():
-                            logger.info("WebSocket连接已建立，开始初始化数据流...")
-
-                            logger.info("正在初始化订单簿...")
-                            # 初始化订单簿并订阅关键数据流
-                            orderbook_initialized = False
-                            retry = 0
-                            while retry < 3:
-                                orderbook_initialized = self.ws.initialize_orderbook()
-                                if orderbook_initialized:
-                                    break
-                                time.sleep(1)
-                                retry += 1
-
-                            depth_subscribed = self.ws.subscribe_depth()
-                            ticker_subscribed = self.ws.subscribe_bookTicker()
-                            order_update_subscribed = self.subscribe_order_updates()
-
-                            if orderbook_initialized and depth_subscribed and ticker_subscribed and order_update_subscribed:
-                                logger.info("WebSocket连接及数据流恢复成功")
-                                return
-                            else:
-                                logger.warning("部分数据流恢复失败，准备重试...")
-                        time.sleep(1)
-                        wait_time += 1
-
-                    attempt += 1
-                    logger.warning(f"第 {attempt} 次后台重连失败，准备再次尝试...")
-
+                            self.ws.ws.close()
+                        except:
+                            pass
+                    self.ws.close()
+                    time.sleep(0.5)
                 except Exception as e:
-                    logger.error(f"重建WebSocket连接时发生异常: {e}")
-                    attempt += 1
-                    time.sleep(3)
+                    logger.error(f"關閉現有WebSocket時出錯: {e}")
 
-            logger.error("无法恢复WebSocket连接，请检查网络状态或API密钥有效性")
+            # 創建新的連接
+            try:
+                logger.info("創建新的WebSocket連接...")
+                self.ws = BackpackWebSocket(
+                    self.api_key,
+                    self.secret_key,
+                    self.symbol,
+                    self.on_ws_message,
+                    auto_reconnect=True,
+                    proxy=self.ws_proxy
+                )
+                self.ws.connect()
 
-        # 启动后台线程
-        thread = threading.Thread(target=reconnect_task, daemon=True)
-        thread.start()
+                # 等待連接建立
+                wait_time = 0
+                max_wait_time = 5
+                while not self.ws.is_connected() and wait_time < max_wait_time:
+                    time.sleep(0.5)
+                    wait_time += 0.5
+
+                if self.ws.is_connected():
+                    logger.info("WebSocket重新連接成功")
+
+                    # 重新初始化
+                    self.ws.initialize_orderbook()
+                    self.ws.subscribe_depth()
+                    self.ws.subscribe_bookTicker()
+                    self.subscribe_order_updates()
+                else:
+                    logger.warning("WebSocket重新連接嘗試中，將在下次迭代再次檢查")
+
+            except Exception as e:
+                logger.error(f"創建新WebSocket連接時出錯: {e}")
+                return False
+
+        return self.ws and self.ws.is_connected()
 
     def check_ws_connection(self):
         """检查WebSocket连接状态，并在必要时异步重连"""
@@ -485,7 +466,7 @@ class GridTrader:
             return True
 
         logger.warning("WebSocket连接断开或不可用，将在后台尝试异步重连")
-        self._async_reconnect()  # 异步重连
+        self.ws_re_connection()  # 重连
         return False
 
     def on_ws_message(self, stream, data):
@@ -1533,6 +1514,7 @@ class GridTrader:
                 })
             elif price > current_price and sell_orders_per_level.get(price, 0) == 0:
                 # 此網格點位沒有賣單，需要補充
+                logger.info(f"價格 {price} 沒有賣單，需要補充 ASK")
                 if base_balance >= self.order_quantity:
                     orders_to_place.append({
                         'price': price,
@@ -1898,17 +1880,17 @@ class GridTrader:
             logger.info("重新訂閲深度數據流...")
             self.ws.initialize_orderbook()  # 重新初始化訂單簿
             self.ws.subscribe_depth()
-        
+        logger.info("已確保所有必要的數據流訂閲")
         # 檢查行情數據訂閲
         if "bookTicker" not in self.ws.subscriptions:
             logger.info("重新訂閲行情數據...")
             self.ws.subscribe_bookTicker()
-        
+        logger.info("已確保所有必要的數據流訂閲")
         # 檢查私有訂單更新流
         if f"account.orderUpdate.{self.symbol}" not in self.ws.subscriptions:
             logger.info("重新訂閲私有訂單更新流...")
             self.subscribe_order_updates()
-    
+        logger.info("已確保所有必要的數據流訂閲")
     def run(self, duration_seconds=3600, interval_seconds=60):
         """執行網格交易策略"""
         logger.info(f"開始運行網格交易策略: {self.symbol}")
@@ -1940,14 +1922,7 @@ class GridTrader:
                 # 初始化訂單簿和數據流
                 if not self.ws.orderbook["bids"] and not self.ws.orderbook["asks"]:
                     self.ws.initialize_orderbook()
-                
-                # 檢查並確保所有數據流訂閲
-                if "depth" not in self.ws.subscriptions:
-                    self.ws.subscribe_depth()
-                if "bookTicker" not in self.ws.subscriptions:
-                    self.ws.subscribe_bookTicker()
-                if f"account.orderUpdate.{self.symbol}" not in self.ws.subscriptions:
-                    self.subscribe_order_updates()
+
             
             # 初始化網格交易
             if not self.grid_initialized:
