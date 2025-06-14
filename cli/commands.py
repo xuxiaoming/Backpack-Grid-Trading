@@ -83,21 +83,21 @@ def get_orderbook_command(api_key, secret_key, ws_proxy=None):
             depth = ws.get_orderbook()
         
         print("\n訂單簿:")
-        print("\n賣單 (從低到高):")
+        print("\n卖單 (從低到高):")
         if 'asks' in depth and depth['asks']:
             asks = sorted(depth['asks'], key=lambda x: x[0])[:10]  # 多展示幾個深度
             for i, (price, quantity) in enumerate(asks):
                 print(f"{i+1}. 價格: {price}, 數量: {quantity}")
         else:
-            print("無賣單數據")
+            print("無卖單數據")
         
-        print("\n買單 (從高到低):")
+        print("\n买單 (從高到低):")
         if 'bids' in depth and depth['bids']:
             bids = sorted(depth['bids'], key=lambda x: x[0], reverse=True)[:10]  # 多展示幾個深度
             for i, (price, quantity) in enumerate(bids):
                 print(f"{i+1}. 價格: {price}, 數量: {quantity}")
         else:
-            print("無買單數據")
+            print("無买單數據")
         
         # 分析市場情緒
         if ws.connected:
@@ -108,12 +108,12 @@ def get_orderbook_command(api_key, secret_key, ws_proxy=None):
                 imbalance = liquidity_profile['imbalance']
                 
                 print("\n市場流動性分析:")
-                print(f"買單量: {buy_volume:.4f}")
-                print(f"賣單量: {sell_volume:.4f}")
-                print(f"買賣比例: {(buy_volume/sell_volume):.2f}") if sell_volume > 0 else print("買賣比例: 無限")
+                print(f"买單量: {buy_volume:.4f}")
+                print(f"卖單量: {sell_volume:.4f}")
+                print(f"买卖比例: {(buy_volume/sell_volume):.2f}") if sell_volume > 0 else print("买卖比例: 無限")
                 
                 # 判斷市場情緒
-                sentiment = "買方壓力較大" if imbalance > 0.2 else "賣方壓力較大" if imbalance < -0.2 else "買賣壓力平衡"
+                sentiment = "买方壓力較大" if imbalance > 0.2 else "卖方壓力較大" if imbalance < -0.2 else "买卖壓力平衡"
                 print(f"市場情緒: {sentiment} ({imbalance:.2f})")
         
         # 關閉WebSocket連接
@@ -129,7 +129,7 @@ def get_orderbook_command(api_key, secret_key, ws_proxy=None):
                 return
             
             print("\n訂單簿 (REST API):")
-            print("\n賣單 (從低到高):")
+            print("\n卖單 (從低到高):")
             if 'asks' in depth and depth['asks']:
                 asks = sorted([
                     [float(price), float(quantity)] for price, quantity in depth['asks']
@@ -137,9 +137,9 @@ def get_orderbook_command(api_key, secret_key, ws_proxy=None):
                 for i, (price, quantity) in enumerate(asks):
                     print(f"{i+1}. 價格: {price}, 數量: {quantity}")
             else:
-                print("無賣單數據")
+                print("無卖單數據")
             
-            print("\n買單 (從高到低):")
+            print("\n买單 (從高到低):")
             if 'bids' in depth and depth['bids']:
                 bids = sorted([
                     [float(price), float(quantity)] for price, quantity in depth['bids']
@@ -147,7 +147,7 @@ def get_orderbook_command(api_key, secret_key, ws_proxy=None):
                 for i, (price, quantity) in enumerate(bids):
                     print(f"{i+1}. 價格: {price}, 數量: {quantity}")
             else:
-                print("無買單數據")
+                print("無买單數據")
         except Exception as e:
             print(f"使用REST API獲取訂單簿也失敗: {str(e)}")
 
@@ -262,8 +262,8 @@ def trading_stats_command(api_key, secret_key):
             
             print(f"\n今日統計 ({today}):")
             print(f"總成交量: {total_volume}")
-            print(f"買入量: {maker_buy + taker_buy}")
-            print(f"賣出量: {maker_sell + taker_sell}")
+            print(f"买入量: {maker_buy + taker_buy}")
+            print(f"卖出量: {maker_sell + taker_sell}")
             print(f"Maker佔比: {maker_percentage:.2f}%")
             print(f"波動率: {volatility:.4f}%")
             print(f"毛利潤: {profit:.8f}")
@@ -290,8 +290,8 @@ def trading_stats_command(api_key, secret_key):
             
             print(f"\n累計統計:")
             print(f"總成交量: {total_volume}")
-            print(f"買入量: {maker_buy + taker_buy}")
-            print(f"賣出量: {maker_sell + taker_sell}")
+            print(f"买入量: {maker_buy + taker_buy}")
+            print(f"卖出量: {maker_sell + taker_sell}")
             print(f"Maker佔比: {maker_percentage:.2f}%")
             print(f"毛利潤: {profit:.8f}")
             print(f"總手續費: {fees:.8f}")
@@ -428,12 +428,12 @@ def market_analysis_command(api_key, secret_key, ws_proxy=None):
                             imbalance = liquidity_profile['imbalance']
                             
                             print("\n市場流動性分析:")
-                            print(f"買單量: {buy_volume:.4f}")
-                            print(f"賣單量: {sell_volume:.4f}")
-                            print(f"買賣比例: {(buy_volume/sell_volume):.2f}" if sell_volume > 0 else "買賣比例: 無限")
+                            print(f"买單量: {buy_volume:.4f}")
+                            print(f"卖單量: {sell_volume:.4f}")
+                            print(f"买卖比例: {(buy_volume/sell_volume):.2f}" if sell_volume > 0 else "买卖比例: 無限")
                             
                             # 判斷市場情緒
-                            sentiment = "買方壓力較大" if imbalance > 0.2 else "賣方壓力較大" if imbalance < -0.2 else "買賣壓力平衡"
+                            sentiment = "买方壓力較大" if imbalance > 0.2 else "卖方壓力較大" if imbalance < -0.2 else "买卖壓力平衡"
                             print(f"市場情緒: {sentiment} ({imbalance:.2f})")
                             
                             # 給出建議的網格參數

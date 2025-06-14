@@ -104,7 +104,7 @@ def calculate_optimal_grid_params(
         params["price_range_pct"] = min(max(volatility * volatility_factor, 1.0), 15.0)
     
     # 計算網格間距，確保能覆蓋手續費
-    total_fee_pct = maker_fee_rate * 200  # 買賣循環總手續費百分比 (0.1% * 2 * 100%)
+    total_fee_pct = maker_fee_rate * 200  # 买卖循環總手續費百分比 (0.1% * 2 * 100%)
     min_grid_gap_pct = total_fee_pct * params["profit_factor"]  # 最小網格間距百分比
     
     # 調整網格數量，確保網格間距足夠
@@ -132,13 +132,13 @@ def calculate_optimal_grid_params(
     required_quote = 0  # 報價貨幣需求
     
     if order_quantity:
-        # 計算賣單所需的基礎貨幣(上半部分網格)
+        # 計算卖單所需的基礎貨幣(上半部分網格)
         sell_grids = (grid_num + 1) // 2  # 上半部分網格數（含中間網格）
         required_base = sell_grids * order_quantity
         
-        # 計算買單所需的報價貨幣(下半部分網格)
+        # 計算买單所需的報價貨幣(下半部分網格)
         buy_grids = (grid_num + 1) - sell_grids  # 下半部分網格數
-        avg_buy_price = (current_price + lower_price) / 2  # 平均買入價格
+        avg_buy_price = (current_price + lower_price) / 2  # 平均买入價格
         required_quote = buy_grids * order_quantity * avg_buy_price
     
     return {
@@ -382,13 +382,13 @@ def interactive_setup():
         required_quote = 0
         
         if order_quantity:
-            # 計算賣單所需的基礎貨幣(上半部分網格)
+            # 計算卖單所需的基礎貨幣(上半部分網格)
             sell_grids = (grid_num + 1) // 2  # 上半部分網格數（含中間網格）
             required_base = sell_grids * order_quantity
             
-            # 計算買單所需的報價貨幣(下半部分網格)
+            # 計算买單所需的報價貨幣(下半部分網格)
             buy_grids = (grid_num + 1) - sell_grids  # 下半部分網格數
-            avg_buy_price = (current_price + lower_price) / 2  # 平均買入價格
+            avg_buy_price = (current_price + lower_price) / 2  # 平均买入價格
             required_quote = buy_grids * order_quantity * avg_buy_price
         
         adjusted_params = {

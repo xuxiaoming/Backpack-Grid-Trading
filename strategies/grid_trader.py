@@ -56,14 +56,14 @@ class GridTrader:
         
         # 舊的網格訂單跟蹤結構（保留向後兼容）
         self.grid_orders = {}  # 保存網格訂單 {網格價格: 訂單信息}
-        self.grid_buy_orders = {}  # 買入網格訂單
-        self.grid_sell_orders = {}  # 賣出網格訂單
+        self.grid_buy_orders = {}  # 买入網格訂單
+        self.grid_sell_orders = {}  # 卖出網格訂單
         
         # 新的網格訂單跟蹤結構
         self.grid_orders_by_price = {}  # {價格: [訂單信息1, 訂單信息2, ...]}
         self.grid_orders_by_id = {}     # {訂單ID: 訂單信息}
-        self.grid_buy_orders_by_price = {}  # {價格: [買單信息1, 買單信息2, ...]}
-        self.grid_sell_orders_by_price = {}  # {價格: [賣單信息1, 賣單信息2, ...]}
+        self.grid_buy_orders_by_price = {}  # {價格: [买單信息1, 买單信息2, ...]}
+        self.grid_sell_orders_by_price = {}  # {價格: [卖單信息1, 卖單信息2, ...]}
         
         # 添加網格點位狀態跟蹤
         self.grid_status = {}  # {價格: 狀態} 狀態可以是 'buy_placed', 'buy_filled', 'sell_placed', 'sell_filled'
@@ -109,7 +109,7 @@ class GridTrader:
         self.ws = BackpackWebSocket(api_key, secret_key, symbol, self.on_ws_message, auto_reconnect=True, proxy=self.ws_proxy)
         self.ws.connect()
         
-        # 記錄買賣數量以便跟蹤
+        # 記錄买卖數量以便跟蹤
         self.total_bought = 0
         self.total_sold = 0
         
@@ -229,8 +229,8 @@ class GridTrader:
                 self.total_fees = stat['total_fees']
                 
                 logger.info(f"已從數據庫加載今日交易統計")
-                logger.info(f"Maker買入量: {self.maker_buy_volume}, Maker賣出量: {self.maker_sell_volume}")
-                logger.info(f"Taker買入量: {self.taker_buy_volume}, Taker賣出量: {self.taker_sell_volume}")
+                logger.info(f"Maker买入量: {self.maker_buy_volume}, Maker卖出量: {self.maker_sell_volume}")
+                logger.info(f"Taker买入量: {self.taker_buy_volume}, Taker卖出量: {self.taker_sell_volume}")
                 logger.info(f"已實現利潤: {self.total_profit}, 總手續費: {self.total_fees}")
             else:
                 logger.info("今日無交易統計記錄，將創建新記錄")
@@ -250,14 +250,14 @@ class GridTrader:
                     price = float(price)
                     fee = float(fee)
                     
-                    if side == 'Bid':  # 買入
+                    if side == 'Bid':  # 买入
                         self.buy_trades.append((price, quantity))
                         self.total_bought += quantity
                         if maker:
                             self.maker_buy_volume += quantity
                         else:
                             self.taker_buy_volume += quantity
-                    elif side == 'Ask':  # 賣出
+                    elif side == 'Ask':  # 卖出
                         self.sell_trades.append((price, quantity))
                         self.total_sold += quantity
                         if maker:
@@ -268,9 +268,9 @@ class GridTrader:
                     self.total_fees += fee
                 
                 logger.info(f"已從數據庫載入 {trades_count} 條歷史成交記錄")
-                logger.info(f"總買入: {self.total_bought} {self.base_asset}, 總賣出: {self.total_sold} {self.base_asset}")
-                logger.info(f"Maker買入: {self.maker_buy_volume} {self.base_asset}, Maker賣出: {self.maker_sell_volume} {self.base_asset}")
-                logger.info(f"Taker買入: {self.taker_buy_volume} {self.base_asset}, Taker賣出: {self.taker_sell_volume} {self.base_asset}")
+                logger.info(f"總买入: {self.total_bought} {self.base_asset}, 總卖出: {self.total_sold} {self.base_asset}")
+                logger.info(f"Maker买入: {self.maker_buy_volume} {self.base_asset}, Maker卖出: {self.maker_sell_volume} {self.base_asset}")
+                logger.info(f"Taker买入: {self.taker_buy_volume} {self.base_asset}, Taker卖出: {self.taker_sell_volume} {self.base_asset}")
                 
                 # 計算精確利潤
                 self.total_profit = self._calculate_db_profit()
@@ -304,7 +304,7 @@ class GridTrader:
             # 找到最接近的網格點位
             grid_price = min(self.grid_levels, key=lambda x: abs(x - price))
             
-            if side == 'Bid':  # 買入成交
+            if side == 'Bid':  # 买入成交
                 # 找到下一個更高的網格點位
                 next_price = None
                 for p in sorted(self.grid_levels):
@@ -318,7 +318,7 @@ class GridTrader:
                     self.grid_status[next_price] = 'sell_placed'
                     self.grid_dependencies[grid_price] = next_price
                     
-            elif side == 'Ask':  # 賣出成交
+            elif side == 'Ask':  # 卖出成交
                 # 解除依賴關係
                 for price, dependent_price in list(self.grid_dependencies.items()):
                     if dependent_price == grid_price:
@@ -329,7 +329,7 @@ class GridTrader:
         if dependency_count > 0:
             logger.info(f"已從歷史交易建立 {dependency_count} 個網格依賴關係")
             for price, dependent_price in self.grid_dependencies.items():
-                logger.info(f"  價格點位 {price} 依賴於 {dependent_price} 的賣單成交")
+                logger.info(f"  價格點位 {price} 依賴於 {dependent_price} 的卖單成交")
     
     def _load_trades_from_api(self):
         """從API加載歷史成交記錄"""
@@ -371,14 +371,14 @@ class GridTrader:
             # 插入數據庫
             self.db.insert_order(order_data)
             
-            if side == 'Bid':  # 買入
+            if side == 'Bid':  # 买入
                 self.buy_trades.append((price, quantity))
                 self.total_bought += quantity
                 if maker:
                     self.maker_buy_volume += quantity
                 else:
                     self.taker_buy_volume += quantity
-            elif side == 'Ask':  # 賣出
+            elif side == 'Ask':  # 卖出
                 self.sell_trades.append((price, quantity))
                 self.total_sold += quantity
                 if maker:
@@ -392,9 +392,9 @@ class GridTrader:
             logger.info(f"已從API載入並存儲 {len(fill_history)} 條歷史成交記錄")
             
             # 更新總計
-            logger.info(f"總買入: {self.total_bought} {self.base_asset}, 總賣出: {self.total_sold} {self.base_asset}")
-            logger.info(f"Maker買入: {self.maker_buy_volume} {self.base_asset}, Maker賣出: {self.maker_sell_volume} {self.base_asset}")
-            logger.info(f"Taker買入: {self.taker_buy_volume} {self.base_asset}, Taker賣出: {self.taker_sell_volume} {self.base_asset}")
+            logger.info(f"總买入: {self.total_bought} {self.base_asset}, 總卖出: {self.total_sold} {self.base_asset}")
+            logger.info(f"Maker买入: {self.maker_buy_volume} {self.base_asset}, Maker卖出: {self.maker_sell_volume} {self.base_asset}")
+            logger.info(f"Taker买入: {self.taker_buy_volume} {self.base_asset}, Taker卖出: {self.taker_sell_volume} {self.base_asset}")
             
             # 計算精確利潤
             self.total_profit = self._calculate_db_profit()
@@ -499,8 +499,8 @@ class GridTrader:
                         # 從訂單跟蹤結構中移除此訂單
                         self._remove_order(order_id, grid_price, side)
                         
-                        if side == 'Bid':  # 買單成交
-                            # 在下一個更高的網格點位創建賣單
+                        if side == 'Bid':  # 买單成交
+                            # 在下一個更高的網格點位創建卖單
                             # 使用线程池异步执行下单操作，避免阻塞主回调线程
                             self.executor.submit(
                                 self._place_sell_order_after_buy, 
@@ -509,8 +509,8 @@ class GridTrader:
                                 quantity, 
                                 fee if fee_asset == self.base_asset else None
                             )
-                        elif side == 'Ask':  # 賣單成交
-                            # 在下一個更低的網格點位創建買單
+                        elif side == 'Ask':  # 卖單成交
+                            # 在下一個更低的網格點位創建买單
                             self.executor.submit(
                                 self._place_buy_order_after_sell, 
                                 price, 
@@ -526,13 +526,13 @@ class GridTrader:
                                 logger.info(f"網格交易(舊結構): 價格 {grid_price} 的訂單已成交")
                                 # 從當前網格訂單中移除
                                 self.grid_orders.pop(grid_price, None)
-                                if side == 'Bid':  # 買單成交
+                                if side == 'Bid':  # 买單成交
                                     self.grid_buy_orders.pop(grid_price, None)
-                                    # 在下一個更高的網格點位創建賣單
+                                    # 在下一個更高的網格點位創建卖單
                                     self.executor.submit(self._place_sell_order_after_buy, price, grid_price, quantity, fee if fee_asset == self.base_asset else None)
-                                elif side == 'Ask':  # 賣單成交
+                                elif side == 'Ask':  # 卖單成交
                                     self.grid_sell_orders.pop(grid_price, None)
-                                    # 在下一個更低的網格點位創建買單
+                                    # 在下一個更低的網格點位創建买單
                                     self.executor.submit(self._place_buy_order_after_sell, price, grid_price, quantity, fee if fee_asset == self.quote_asset else None)
                                 found = True
                                 break
@@ -566,11 +566,11 @@ class GridTrader:
                     # 直接在當前線程中插入訂單數據，確保先寫入基本數據
                     safe_insert_order()
                     
-                    # 更新買賣量和做市商成交量統計
-                    if side == 'Bid':  # 買入
+                    # 更新买卖量和做市商成交量統計
+                    if side == 'Bid':  # 买入
                         self.total_bought += quantity
                         self.buy_trades.append((price, quantity))
-                        logger.info(f"買入成交: {quantity} {self.base_asset} @ {price} {self.quote_asset}")
+                        logger.info(f"买入成交: {quantity} {self.base_asset} @ {price} {self.quote_asset}")
                         
                         # 更新做市商成交量
                         if maker:
@@ -582,10 +582,10 @@ class GridTrader:
                         
                         self.session_buy_trades.append((price, quantity))
                             
-                    elif side == 'Ask':  # 賣出
+                    elif side == 'Ask':  # 卖出
                         self.total_sold += quantity
                         self.sell_trades.append((price, quantity))
-                        logger.info(f"賣出成交: {quantity} {self.base_asset} @ {price} {self.quote_asset}")
+                        logger.info(f"卖出成交: {quantity} {self.base_asset} @ {price} {self.quote_asset}")
                         
                         # 更新做市商成交量
                         if maker:
@@ -631,9 +631,9 @@ class GridTrader:
                     logger.info(f"本次執行淨利潤: {(session_profit - self.session_fees):.8f} {self.quote_asset}")
                     
                     self.trades_executed += 1
-                    logger.info(f"總買入: {self.total_bought} {self.base_asset}, 總賣出: {self.total_sold} {self.base_asset}")
-                    logger.info(f"Maker買入: {self.maker_buy_volume} {self.base_asset}, Maker賣出: {self.maker_sell_volume} {self.base_asset}")
-                    logger.info(f"Taker買入: {self.taker_buy_volume} {self.base_asset}, Taker賣出: {self.taker_sell_volume} {self.base_asset}")
+                    logger.info(f"總买入: {self.total_bought} {self.base_asset}, 總卖出: {self.total_sold} {self.base_asset}")
+                    logger.info(f"Maker买入: {self.maker_buy_volume} {self.base_asset}, Maker卖出: {self.maker_sell_volume} {self.base_asset}")
+                    logger.info(f"Taker买入: {self.taker_buy_volume} {self.base_asset}, Taker卖出: {self.taker_sell_volume} {self.base_asset}")
                     
                 except Exception as e:
                     logger.error(f"處理訂單成交消息時出錯: {e}")
@@ -654,7 +654,7 @@ class GridTrader:
             if not self.grid_orders_by_price[grid_price]:
                 del self.grid_orders_by_price[grid_price]
         
-        # 從相應的買賣單字典中移除
+        # 從相應的买卖單字典中移除
         if side == 'Bid' and grid_price in self.grid_buy_orders_by_price:
             self.grid_buy_orders_by_price[grid_price] = [order for order in self.grid_buy_orders_by_price[grid_price] 
                                                       if order.get('order_id') != order_id]
@@ -668,8 +668,8 @@ class GridTrader:
                 del self.grid_sell_orders_by_price[grid_price]
     
     def _place_sell_order_after_buy(self, executed_price, grid_price, quantity, actual_fee=None):
-        """買單成交後在上一個網格點位放置賣單"""
-        # 找到買入價格的下一個更高網格點位
+        """买單成交後在上一個網格點位放置卖單"""
+        # 找到买入價格的下一個更高網格點位
         next_price = None
         for price in sorted(self.grid_levels):
             if price > grid_price:
@@ -681,7 +681,7 @@ class GridTrader:
             return
 
         if next_price:
-            logger.info(f"在網格點位 {next_price} 放置賣單 (買入價格: {executed_price})")
+            logger.info(f"在網格點位 {next_price} 放置卖單 (买入價格: {executed_price})")
             
             # 調整數量，考慮到實際手續費
             if actual_fee is not None and isinstance(actual_fee, (int, float)):
@@ -699,7 +699,7 @@ class GridTrader:
                 logger.info(f"調整後數量 {adjusted_quantity} 低於最小訂單大小，使用最小值 {self.min_order_size}")
                 adjusted_quantity = self.min_order_size
             
-            # 放置賣單
+            # 放置卖單
             order_details = {
                 "orderType": "Limit",
                 "price": str(next_price),
@@ -713,10 +713,10 @@ class GridTrader:
             result = execute_order(self.api_key, self.secret_key, order_details)
             
             if isinstance(result, dict) and "error" in result:
-                logger.error(f"放置賣單失敗: {result['error']}")
+                logger.error(f"放置卖單失敗: {result['error']}")
             else:
                 order_id = result.get('id')
-                logger.info(f"成功放置賣單: 價格={next_price}, 數量={adjusted_quantity}, 訂單ID={order_id}")
+                logger.info(f"成功放置卖單: 價格={next_price}, 數量={adjusted_quantity}, 訂單ID={order_id}")
                 
                 if order_id:
                     # 創建訂單信息
@@ -737,7 +737,7 @@ class GridTrader:
                         self.grid_orders_by_price[next_price] = []
                     self.grid_orders_by_price[next_price].append(order_info)
                     
-                    # 添加到賣單字典
+                    # 添加到卖單字典
                     if next_price not in self.grid_sell_orders_by_price:
                         self.grid_sell_orders_by_price[next_price] = []
                     self.grid_sell_orders_by_price[next_price].append(order_info)
@@ -756,21 +756,21 @@ class GridTrader:
                     
                     # 記錄此價格點位的訂單數量
                     sell_count = len(self.grid_sell_orders_by_price.get(next_price, []))
-                    logger.info(f"網格點位 {next_price} 現有賣單數: {sell_count}")
+                    logger.info(f"網格點位 {next_price} 現有卖單數: {sell_count}")
                     
                     # 更新網格狀態
                     self.grid_status[grid_price] = 'buy_filled'
                     self.grid_status[next_price] = 'sell_placed'
                     
-                    # 建立依賴關係：當next_price的賣單成交後，才能在grid_price補充買單
+                    # 建立依賴關係：當next_price的卖單成交後，才能在grid_price補充买單
                     self.grid_dependencies[grid_price] = next_price
-                    logger.info(f"建立依賴關係: 價格點位 {grid_price} 依賴於 {next_price} 的賣單成交")
+                    logger.info(f"建立依賴關係: 價格點位 {grid_price} 依賴於 {next_price} 的卖單成交")
 
 
 
     def _place_buy_order_after_sell(self, executed_price, grid_price, quantity, actual_fee=None):
-        """賣單成交後在下一個網格點位放置買單"""
-        # 找到賣出價格的下一個更低網格點位
+        """卖單成交後在下一個網格點位放置买單"""
+        # 找到卖出價格的下一個更低網格點位
         next_price = None
         for price in sorted(self.grid_levels, reverse=True):
             if price < grid_price:
@@ -781,9 +781,9 @@ class GridTrader:
             return
 
         if next_price:
-            logger.info(f"在網格點位 {next_price} 放置買單 (賣出價格: {executed_price})")
+            logger.info(f"在網格點位 {next_price} 放置买單 (卖出價格: {executed_price})")
             
-            # 計算賣出實際獲得的資金
+            # 計算卖出實際獲得的資金
             if actual_fee is not None and isinstance(actual_fee, (int, float)):
                 # 使用實際手續費（USDC為單位）
                 if actual_fee > 0 and actual_fee < (executed_price * quantity):  # 合理的手續費範圍
@@ -794,22 +794,22 @@ class GridTrader:
                 # 使用估計手續費
                 sell_value = executed_price * quantity * 0.999
             
-            # 計算可買入的數量
+            # 計算可买入的數量
             buy_quantity = round_to_precision(sell_value / next_price, self.base_precision)
             
             # 檢查最小訂單大小
             if buy_quantity < self.min_order_size:
-                logger.info(f"計算得出的買入數量 {buy_quantity} 低於最小訂單大小，使用最小值 {self.min_order_size}")
+                logger.info(f"計算得出的买入數量 {buy_quantity} 低於最小訂單大小，使用最小值 {self.min_order_size}")
                 buy_quantity = self.min_order_size
             
             # 檢查是否超過最大持倉限制
             net_position = self.total_bought - self.total_sold
             
             if net_position + buy_quantity > self.max_position:
-                logger.warning(f"跳過買入：當前淨持倉 {net_position}，新增 {buy_quantity} 將超過最大限制 {self.max_position}")
+                logger.warning(f"跳過买入：當前淨持倉 {net_position}，新增 {buy_quantity} 將超過最大限制 {self.max_position}")
                 return
             
-            # 放置買單
+            # 放置买單
             order_details = {
                 "orderType": "Limit",
                 "price": str(next_price),
@@ -823,10 +823,10 @@ class GridTrader:
             result = execute_order(self.api_key, self.secret_key, order_details)
             
             if isinstance(result, dict) and "error" in result:
-                logger.error(f"放置買單失敗: {result['error']}")
+                logger.error(f"放置买單失敗: {result['error']}")
             else:
                 order_id = result.get('id')
-                logger.info(f"成功放置買單: 價格={next_price}, 數量={buy_quantity}, 訂單ID={order_id}")
+                logger.info(f"成功放置买單: 價格={next_price}, 數量={buy_quantity}, 訂單ID={order_id}")
                 
                 if order_id:
                     # 創建訂單信息
@@ -847,7 +847,7 @@ class GridTrader:
                         self.grid_orders_by_price[next_price] = []
                     self.grid_orders_by_price[next_price].append(order_info)
                     
-                    # 添加到買單字典
+                    # 添加到买單字典
                     if next_price not in self.grid_buy_orders_by_price:
                         self.grid_buy_orders_by_price[next_price] = []
                     self.grid_buy_orders_by_price[next_price].append(order_info)
@@ -866,17 +866,17 @@ class GridTrader:
                     
                     # 記錄此價格點位的訂單數量
                     buy_count = len(self.grid_buy_orders_by_price.get(next_price, []))
-                    logger.info(f"網格點位 {next_price} 現有買單數: {buy_count}")
+                    logger.info(f"網格點位 {next_price} 現有买單數: {buy_count}")
                     
                     # 更新網格狀態
                     self.grid_status[grid_price] = 'sell_filled'
                     self.grid_status[next_price] = 'buy_placed'
                     
-                    # 解除依賴關係：釋放依賴於此銷售點位的買點位
+                    # 解除依賴關係：釋放依賴於此銷售點位的买點位
                     dependencies_resolved = []
                     for price, dependent_price in list(self.grid_dependencies.items()):
                         if dependent_price == grid_price:
-                            # 移除依賴，表示可以在price處放置新的買單
+                            # 移除依賴，表示可以在price處放置新的买單
                             del self.grid_dependencies[price]
                             dependencies_resolved.append(price)
                     
@@ -986,7 +986,7 @@ class GridTrader:
             traceback.print_exc()
     
     def _calculate_average_buy_cost(self):
-        """計算平均買入成本"""
+        """計算平均买入成本"""
         if not self.buy_trades:
             return 0
             
@@ -1077,8 +1077,9 @@ class GridTrader:
         """獲取當前價格（優先使用WebSocket數據）"""
         self.check_ws_connection()
         price = None
-        if self.ws and self.ws.connected:
-            price = self.ws.get_current_price()
+        """实时价格从接口获取"""
+        # if self.ws and self.ws.connected:
+        #     price = self.ws.get_current_price()
         
         if price is None:
             ticker = get_ticker(self.symbol)
@@ -1323,11 +1324,11 @@ class GridTrader:
         self.grid_buy_orders_by_price = {}
         self.grid_sell_orders_by_price = {}
         
-        # 設置買單和賣單
+        # 設置买單和卖單
         for i, price in enumerate(self.grid_levels):
-            # 根據價格相對於當前價格的位置決定買單或賣單
+            # 根據價格相對於當前價格的位置決定买單或卖單
             if price < current_price:
-                # 在當前價格下方設置買單
+                # 在當前價格下方設置买單
                 order_details = {
                     "orderType": "Limit",
                     "price": str(price),
@@ -1341,10 +1342,10 @@ class GridTrader:
                 result = execute_order(self.api_key, self.secret_key, order_details)
                 
                 if isinstance(result, dict) and "error" in result:
-                    logger.error(f"設置買單失敗 (價格 {price}): {result['error']}")
+                    logger.error(f"設置买單失敗 (價格 {price}): {result['error']}")
                 else:
                     order_id = result.get('id')
-                    logger.info(f"成功設置買單: 價格={price}, 數量={self.order_quantity}, 訂單ID={order_id}")
+                    logger.info(f"成功設置买單: 價格={price}, 數量={self.order_quantity}, 訂單ID={order_id}")
                     
                     # 更新舊訂單結構
                     self.grid_orders[price] = {
@@ -1381,7 +1382,7 @@ class GridTrader:
                     placed_orders += 1
             
             elif price > current_price:
-                # 在當前價格上方設置賣單
+                # 在當前價格上方設置卖單
                 # 確保有足夠的基礎資產
                 if base_balance >= self.order_quantity:
                     order_details = {
@@ -1397,10 +1398,10 @@ class GridTrader:
                     result = execute_order(self.api_key, self.secret_key, order_details)
                     
                     if isinstance(result, dict) and "error" in result:
-                        logger.error(f"設置賣單失敗 (價格 {price}): {result['error']}")
+                        logger.error(f"設置卖單失敗 (價格 {price}): {result['error']}")
                     else:
                         order_id = result.get('id')
-                        logger.info(f"成功設置賣單: 價格={price}, 數量={self.order_quantity}, 訂單ID={order_id}")
+                        logger.info(f"成功設置卖單: 價格={price}, 數量={self.order_quantity}, 訂單ID={order_id}")
                         
                         # 更新舊訂單結構
                         self.grid_orders[price] = {
@@ -1437,7 +1438,7 @@ class GridTrader:
                         placed_orders += 1
                         base_balance -= self.order_quantity  # 更新可用基礎資產餘額
                 else:
-                    logger.warning(f"基礎資產餘額不足，無法設置賣單 (價格 {price})")
+                    logger.warning(f"基礎資產餘額不足，無法設置卖單 (價格 {price})")
         
         logger.info(f"網格初始化完成: 共放置 {placed_orders} 個訂單")
         self.grid_initialized = True
@@ -1497,7 +1498,7 @@ class GridTrader:
                 # 檢查此價格點位是否存在依賴關係 - 如果有依賴且依賴未解除，則不補單
                 if price in self.grid_dependencies:
                     dependent_price = self.grid_dependencies[price]
-                    logger.info(f"價格點位 {price} 的買單依賴於價位 {dependent_price} 的賣單成交，暫不補充")
+                    logger.info(f"價格點位 {price} 的买單依賴於價位 {dependent_price} 的卖單成交，暫不補充")
                     continue
 
                     # 新增：检查该价格是否已有订单
@@ -1506,15 +1507,15 @@ class GridTrader:
                         logger.info(f"價格 {price} 已有买单一筆，跳过补单")
                         continue
                 
-                # 此網格點位沒有買單，需要補充
+                # 此網格點位沒有买單，需要補充
                 orders_to_place.append({
                     'price': price,
                     'side': 'Bid',
                     'quantity': self.order_quantity
                 })
             elif price > current_price and sell_orders_per_level.get(price, 0) == 0:
-                # 此網格點位沒有賣單，需要補充
-                logger.info(f"價格 {price} 沒有賣單，需要補充 ASK")
+                # 此網格點位沒有卖單，需要補充
+                logger.info(f"價格 {price} 沒有卖單，需要補充 ASK")
                 if base_balance >= self.order_quantity:
                     orders_to_place.append({
                         'price': price,
@@ -1523,7 +1524,7 @@ class GridTrader:
                     })
                     base_balance -= self.order_quantity
                 else:
-                    logger.warning(f"基礎資產餘額不足，無法在價格 {price} 處補充賣單")
+                    logger.warning(f"基礎資產餘額不足，無法在價格 {price} 處補充卖單")
         
         # 放置新訂單
         orders_placed = 0
@@ -1724,7 +1725,7 @@ class GridTrader:
         total_buy_orders = sum(len(orders) for orders in self.grid_buy_orders_by_price.values())
         total_sell_orders = sum(len(orders) for orders in self.grid_sell_orders_by_price.values())
         
-        logger.info(f"當前活躍網格訂單: 買單 {total_buy_orders} 個, 賣單 {total_sell_orders} 個")
+        logger.info(f"當前活躍網格訂單: 买單 {total_buy_orders} 個, 卖單 {total_sell_orders} 個")
     
     def estimate_profit(self):
         """估算潛在利潤"""
@@ -1774,9 +1775,9 @@ class GridTrader:
         session_buy_volume = sum(qty for _, qty in self.session_buy_trades)
         session_sell_volume = sum(qty for _, qty in self.session_sell_trades)
         
-        logger.info(f"本次執行買入量: {session_buy_volume} {self.base_asset}, 賣出量: {session_sell_volume} {self.base_asset}")
-        logger.info(f"本次執行Maker買入: {self.session_maker_buy_volume} {self.base_asset}, Maker賣出: {self.session_maker_sell_volume} {self.base_asset}")
-        logger.info(f"本次執行Taker買入: {self.session_taker_buy_volume} {self.base_asset}, Taker賣出: {self.session_taker_sell_volume} {self.base_asset}")
+        logger.info(f"本次執行买入量: {session_buy_volume} {self.base_asset}, 卖出量: {session_sell_volume} {self.base_asset}")
+        logger.info(f"本次執行Maker买入: {self.session_maker_buy_volume} {self.base_asset}, Maker卖出: {self.session_maker_sell_volume} {self.base_asset}")
+        logger.info(f"本次執行Taker买入: {self.session_taker_buy_volume} {self.base_asset}, Taker卖出: {self.session_taker_sell_volume} {self.base_asset}")
     
     def print_trading_stats(self):
         """打印交易統計報表"""
@@ -1805,8 +1806,8 @@ class GridTrader:
                 maker_percentage = ((maker_buy + maker_sell) / total_volume * 100) if total_volume > 0 else 0
                 
                 logger.info(f"\n今日統計 ({today}):")
-                logger.info(f"買入量: {maker_buy + taker_buy} {self.base_asset}")
-                logger.info(f"賣出量: {maker_sell + taker_sell} {self.base_asset}")
+                logger.info(f"买入量: {maker_buy + taker_buy} {self.base_asset}")
+                logger.info(f"卖出量: {maker_sell + taker_sell} {self.base_asset}")
                 logger.info(f"總成交量: {total_volume} {self.base_asset}")
                 logger.info(f"Maker佔比: {maker_percentage:.2f}%")
                 logger.info(f"波動率: {volatility:.4f}%")
@@ -1824,7 +1825,7 @@ class GridTrader:
             total_buy_orders = sum(len(orders) for orders in self.grid_buy_orders_by_price.values())
             total_sell_orders = sum(len(orders) for orders in self.grid_sell_orders_by_price.values())
             
-            logger.info(f"當前活躍網格訂單: 買單 {total_buy_orders} 個, 賣單 {total_sell_orders} 個")
+            logger.info(f"當前活躍網格訂單: 买單 {total_buy_orders} 個, 卖單 {total_sell_orders} 個")
             
             # 持倉統計
             net_position = self.total_bought - self.total_sold
@@ -1847,8 +1848,8 @@ class GridTrader:
                 maker_percentage = ((total_maker_buy + total_maker_sell) / total_volume * 100) if total_volume > 0 else 0
                 
                 logger.info(f"\n累計統計:")
-                logger.info(f"買入量: {total_maker_buy + total_taker_buy} {self.base_asset}")
-                logger.info(f"賣出量: {total_maker_sell + total_taker_sell} {self.base_asset}")
+                logger.info(f"买入量: {total_maker_buy + total_taker_buy} {self.base_asset}")
+                logger.info(f"卖出量: {total_maker_sell + total_taker_sell} {self.base_asset}")
                 logger.info(f"總成交量: {total_volume} {self.base_asset}")
                 logger.info(f"Maker佔比: {maker_percentage:.2f}%")
                 logger.info(f"毛利潤: {total_profit:.8f} {self.quote_asset}")
@@ -1868,7 +1869,7 @@ class GridTrader:
             if self.grid_dependencies:
                 logger.info("\n當前網格依賴關係:")
                 for price, dependent_price in self.grid_dependencies.items():
-                    logger.info(f"價格點位 {price} 依賴於 {dependent_price} 的賣單成交")
+                    logger.info(f"價格點位 {price} 依賴於 {dependent_price} 的卖單成交")
         
         except Exception as e:
             logger.error(f"打印交易統計時出錯: {e}")
@@ -1880,17 +1881,17 @@ class GridTrader:
             logger.info("重新訂閲深度數據流...")
             self.ws.initialize_orderbook()  # 重新初始化訂單簿
             self.ws.subscribe_depth()
-        logger.info("已確保所有必要的數據流訂閲")
+        logger.info("已確保深度數據流訂閲")
         # 檢查行情數據訂閲
         if "bookTicker" not in self.ws.subscriptions:
             logger.info("重新訂閲行情數據...")
             self.ws.subscribe_bookTicker()
-        logger.info("已確保所有必要的數據流訂閲")
+        logger.info("已確保行情的數據流訂閲")
         # 檢查私有訂單更新流
         if f"account.orderUpdate.{self.symbol}" not in self.ws.subscriptions:
             logger.info("重新訂閲私有訂單更新流...")
             self.subscribe_order_updates()
-        logger.info("已確保所有必要的數據流訂閲")
+        logger.info("已確保訂閲私有訂單訂閲")
     def run(self, duration_seconds=3600, interval_seconds=60):
         """執行網格交易策略"""
         logger.info(f"開始運行網格交易策略: {self.symbol}")
@@ -1976,8 +1977,8 @@ class GridTrader:
                 logger.info(f"總交易次數: {self.trades_executed}")
                 logger.info(f"總下單次數: {self.orders_placed}")
                 logger.info(f"總取消訂單次數: {self.orders_cancelled}")
-                logger.info(f"買入總量: {self.total_bought} {self.base_asset}")
-                logger.info(f"賣出總量: {self.total_sold} {self.base_asset}")
+                logger.info(f"买入總量: {self.total_bought} {self.base_asset}")
+                logger.info(f"卖出總量: {self.total_sold} {self.base_asset}")
                 logger.info(f"淨持倉: {net_position:.8f} {self.base_asset} ({position_percentage:.2f}% 占用)")
                 logger.info(f"總手續費: {total_fees:.8f} {self.quote_asset}")
                 logger.info(f"已實現利潤: {realized_pnl:.8f} {self.quote_asset}")
@@ -1989,9 +1990,9 @@ class GridTrader:
                 logger.info(f"\n---本次執行統計---")
                 session_buy_volume = sum(qty for _, qty in self.session_buy_trades)
                 session_sell_volume = sum(qty for _, qty in self.session_sell_trades)
-                logger.info(f"買入量: {session_buy_volume} {self.base_asset}, 賣出量: {session_sell_volume} {self.base_asset}")
-                logger.info(f"Maker買入: {self.session_maker_buy_volume} {self.base_asset}, Maker賣出: {self.session_maker_sell_volume} {self.base_asset}")
-                logger.info(f"Taker買入: {self.session_taker_buy_volume} {self.base_asset}, Taker賣出: {self.session_taker_sell_volume} {self.base_asset}")
+                logger.info(f"买入量: {session_buy_volume} {self.base_asset}, 卖出量: {session_sell_volume} {self.base_asset}")
+                logger.info(f"Maker买入: {self.session_maker_buy_volume} {self.base_asset}, Maker卖出: {self.session_maker_sell_volume} {self.base_asset}")
+                logger.info(f"Taker买入: {self.session_taker_buy_volume} {self.base_asset}, Taker卖出: {self.session_taker_sell_volume} {self.base_asset}")
                 logger.info(f"本次執行已實現利潤: {session_realized_pnl:.8f} {self.quote_asset}")
                 logger.info(f"本次執行手續費: {session_fees:.8f} {self.quote_asset}")
                 logger.info(f"本次執行凈利潤: {session_net_pnl:.8f} {self.quote_asset}")
@@ -2003,8 +2004,8 @@ class GridTrader:
                 # 打印當前網格狀態
                 logger.info(f"\n---當前網格狀態---")
                 logger.info(f"網格點位: {self.grid_levels[0]} - {self.grid_levels[-1]} ({len(self.grid_levels)} 個點位)")
-                logger.info(f"活躍買單數量: {total_buy_orders}")
-                logger.info(f"活躍賣單數量: {total_sell_orders}")
+                logger.info(f"活躍买單數量: {total_buy_orders}")
+                logger.info(f"活躍卖單數量: {total_sell_orders}")
                 logger.info(f"依賴關係數量: {len(self.grid_dependencies)}")
                 current_price = self.get_current_price()
                 if current_price:
@@ -2014,7 +2015,7 @@ class GridTrader:
                 if self.grid_dependencies:
                     logger.info("\n當前網格依賴關係:")
                     for price, dependent_price in self.grid_dependencies.items():
-                        logger.info(f"  價格點位 {price} 依賴於 {dependent_price} 的賣單成交")
+                        logger.info(f"  價格點位 {price} 依賴於 {dependent_price} 的卖單成交")
                 
                 wait_time = interval_seconds
                 logger.info(f"等待 {wait_time} 秒後進行下一次迭代...")

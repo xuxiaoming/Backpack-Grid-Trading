@@ -84,9 +84,9 @@ class BackpackWebSocket:
             self.orderbook["bids"] = sorted(self.orderbook["bids"], key=lambda x: x[0], reverse=True)
             self.orderbook["asks"] = sorted(self.orderbook["asks"], key=lambda x: x[0])
             
-            logger.info(f"訂單簿初始化成功: {len(self.orderbook['bids'])} 個買單, {len(self.orderbook['asks'])} 個賣單")
+            logger.info(f"訂單簿初始化成功: {len(self.orderbook['bids'])} 個买單, {len(self.orderbook['asks'])} 個卖單")
             
-            # 初始化最高買價和最低賣價
+            # 初始化最高买價和最低卖價
             if self.orderbook["bids"]:
                 self.bid_price = self.orderbook["bids"][0][0]
             if self.orderbook["asks"]:
@@ -417,7 +417,7 @@ class BackpackWebSocket:
 
     def _update_orderbook(self, data):
         """更新訂單簿（優化處理速度）"""
-        # 處理買單更新
+        # 處理买單更新
         if 'b' in data:
             for bid in data['b']:
                 price = float(bid[0])
@@ -442,7 +442,7 @@ class BackpackWebSocket:
                         # 按價格降序排序
                         self.orderbook["bids"] = sorted(self.orderbook["bids"], key=lambda x: x[0], reverse=True)
 
-        # 處理賣單更新
+        # 處理卖單更新
         if 'a' in data:
             for ask in data['a']:
                 price = float(ask[0])
@@ -548,7 +548,7 @@ class BackpackWebSocket:
         return self.last_price
     
     def get_bid_ask(self):
-        """獲取買賣價"""
+        """獲取买卖價"""
         return self.bid_price, self.ask_price
     
     def get_orderbook(self):
@@ -583,14 +583,14 @@ class BackpackWebSocket:
         min_price = mid_price * (1 - depth_percentage)
         max_price = mid_price * (1 + depth_percentage)
         
-        # 分析買賣單流動性
+        # 分析买卖單流動性
         bid_volume = sum(qty for price, qty in self.orderbook["bids"] if price >= min_price)
         ask_volume = sum(qty for price, qty in self.orderbook["asks"] if price <= max_price)
         
-        # 計算買賣比例
+        # 計算买卖比例
         ratio = bid_volume / ask_volume if ask_volume > 0 else float('inf')
         
-        # 買賣壓力差異
+        # 买卖壓力差異
         imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume) if (bid_volume + ask_volume) > 0 else 0
         
         return {
