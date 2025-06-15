@@ -1077,9 +1077,10 @@ class GridTrader:
         """獲取當前價格（優先使用WebSocket數據）"""
         self.check_ws_connection()
         price = None
-        """实时价格从接口获取"""
-        # if self.ws and self.ws.connected:
-        #     price = self.ws.get_current_price()
+        if self.ws and self.ws.connected:
+            price = self.ws.get_current_price()
+
+        logger.info(f"当前价格是: {price}")
         
         if price is None:
             ticker = get_ticker(self.symbol)
@@ -1501,11 +1502,6 @@ class GridTrader:
                     logger.info(f"價格點位 {price} 的买單依賴於價位 {dependent_price} 的卖單成交，暫不補充")
                     continue
 
-                    # 新增：检查该价格是否已有订单
-                    existing_orders = self.grid_buy_orders_by_price.get(price, [])
-                    if any(order['price'] == price for order in existing_orders):
-                        logger.info(f"價格 {price} 已有买单一筆，跳过补单")
-                        continue
                 
                 # 此網格點位沒有买單，需要補充
                 orders_to_place.append({
