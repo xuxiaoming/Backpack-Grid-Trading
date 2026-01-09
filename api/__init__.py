@@ -7,12 +7,14 @@ from .base_client import BaseExchangeClient
 from .bp_client import BPClient
 from .aster_client import AsterClient
 from .lighter_client import LighterClient  # 輕量依賴，可安全頂層導入
+from .standx_client import StandXClient
 
 __all__ = [
     "BaseExchangeClient",
     "BPClient",
     "AsterClient",
     "LighterClient",
+    "StandXClient",
     "get_client",
 ]
 
@@ -29,6 +31,8 @@ def get_client(name: str, *args, **kwargs):
         return BPClient(*args, **kwargs)
     elif name == "aster":
         return AsterClient(*args, **kwargs)
+    elif name == "standx":
+        return StandXClient(*args, **kwargs)
     else:
         raise ValueError(f"未知交易所: {name}")
 
@@ -37,4 +41,6 @@ def __getattr__(name: str):
     if name == "ParadexClient":
         from .paradex_client import ParadexClient
         return ParadexClient
+    if name == "StandXClient":
+        return StandXClient
     raise AttributeError(name)

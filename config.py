@@ -1,6 +1,6 @@
 """
 配置文件 - 全局配置管理中心
-支持多交易所配置（Backpack, Aster, Paradex）
+支持多交易所配置（Backpack, Aster, Paradex, StandX）
 """
 import os
 from dotenv import load_dotenv
@@ -20,6 +20,7 @@ ENABLE_DATABASE = os.getenv('ENABLE_DATABASE', '0').strip().lower() in {"1", "tr
 
 # 日誌配置
 LOG_FILE = os.getenv('LOG_FILE', 'market_maker.log')
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
 
 # ==================== Backpack 交易所配置 ====================
 
@@ -56,6 +57,24 @@ PARADEX_BASE_URL = os.getenv('PARADEX_BASE_URL', 'https://api.prod.paradex.trade
 # Paradex 簽名設置
 PARADEX_SIGNATURE_TTL_SECONDS = int(os.getenv('PARADEX_SIGNATURE_TTL_SECONDS', '1800'))  # 30分鐘
 PARADEX_JWT_REFRESH_BUFFER = int(os.getenv('PARADEX_JWT_REFRESH_BUFFER', '120'))  # 提前2分鐘刷新
+
+# ==================== StandX 交易所配置 ====================
+
+# StandX API 憑證
+STANDX_API_KEY = os.getenv('STANDX_API_KEY') or os.getenv('STANDX_KEY')
+STANDX_SECRET_KEY = os.getenv('STANDX_SECRET_KEY') or os.getenv('STANDX_SECRET')
+STANDX_JWT_TOKEN = os.getenv('STANDX_JWT_TOKEN')  # JWT token for authentication
+
+# StandX Body Signature（ed25519 密钥对）
+# ⚠️ 重要：StandX 的 body signature 必须使用认证时生成的 ed25519 密钥对
+STANDX_ED25519_PRIVATE_KEY_BYTES = os.getenv('STANDX_ED25519_PRIVATE_KEY_BYTES')  # ed25519 私钥（十六进制）
+STANDX_ED25519_REQUEST_ID = os.getenv('STANDX_ED25519_REQUEST_ID')  # base58 编码的公钥（requestId）
+
+# StandX 会话 ID（需要与 WebSocket 客户端一致）
+STANDX_SESSION_ID = os.getenv('STANDX_SESSION_ID')
+
+# StandX API 端點
+STANDX_BASE_URL = os.getenv('STANDX_BASE_URL', 'https://perps.standx.com')
 
 # ==================== 向後兼容性（保留舊變數名） ====================
 # 注意：這些變數已被標記為 Deprecated，建議使用上面的 BACKPACK_ 前綴變數

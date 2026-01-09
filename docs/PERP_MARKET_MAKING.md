@@ -30,7 +30,8 @@ python run.py --exchange lighter --market-type perp --symbol BTC --spread 0.01 -
 # APEX 永續做市
 python run.py --exchange apex --market-type perp --symbol BTCUSDT --spread 0.01 --quantity 0.001 --max-orders 2 --target-position 0 --max-position 1 --position-threshold 0.1 --inventory-skew 0 --stop-loss -10 --take-profit 20 --duration 3600 --interval 10
 ```
-
+# StandX 永续合约做市（带止损止盈）
+python run.py --exchange standx  --symbol BTC-USDT --spread 0.3  --market-type perp --target-position 1.0 --max-position 1.0 --stop-loss -25 --take-profit 50 --duration 3600 --interval 60
 ## 倉位管理邏輯
 
 ### 倉位調整示例

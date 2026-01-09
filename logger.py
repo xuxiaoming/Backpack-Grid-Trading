@@ -3,7 +3,7 @@
 """
 import logging
 import sys
-from config import LOG_FILE
+from config import LOG_FILE, LOG_LEVEL
 
 def setup_logger(name="market_maker"):
     """
@@ -15,7 +15,8 @@ def setup_logger(name="market_maker"):
     if logger.handlers:
         return logger
         
-    logger.setLevel(logging.INFO)
+    level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+    logger.setLevel(level)
     
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     

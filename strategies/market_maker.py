@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from api.bp_client import BPClient
 from api.aster_client import AsterClient
 from api.lighter_client import LighterClient
+from api.standx_client import StandXClient
 from ws_client.client import BackpackWebSocket
 from database.db import Database
 from utils.helpers import round_to_precision, round_to_tick_size, calculate_volatility
@@ -71,6 +72,8 @@ class MarketMaker:
         elif exchange == 'apex':
             from api.apex_client import ApexClient
             self.client = ApexClient(self.exchange_config)
+        elif exchange == 'standx':
+            self.client = StandXClient(self.exchange_config)
         else:
             raise ValueError(f"不支持的交易所: {exchange}")
             

@@ -9,3 +9,9 @@ flask-socketio
 python-socketio
 werkzeug
 apexomni
+eth-account
+web3
+PyJWT
+cryptography
+base58
+pynacl
