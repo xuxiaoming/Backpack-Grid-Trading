@@ -1,0 +1,16 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.log
+.env
+env
+*.egg-info
+build
+dist
+Signer/
+terminals/
+market_maker.log
+orders.db
+*.sqlite3

@@ -14,6 +14,7 @@ from api.aster_client import AsterClient
 from api.lighter_client import LighterClient
 from api.standx_client import StandXClient
 from ws_client.client import BackpackWebSocket
+from ws_client.standx_ws import StandXWebSocket
 from database.db import Database
 from utils.helpers import round_to_precision, round_to_tick_size, calculate_volatility
 from logger import setup_logger
@@ -167,9 +168,10 @@ class MarketMaker:
         if exchange == 'backpack':
             self.ws = BackpackWebSocket(api_key, secret_key, symbol, self.on_ws_message, auto_reconnect=True)
             self.ws.connect()
-        elif exchange == 'xx':
-            ...
-            self.ws = None
+        elif exchange == 'standx':
+            jwt_token = self.exchange_config.get("jwt_token")
+            self.ws = StandXWebSocket(jwt_token, symbol, self.on_ws_message, auto_reconnect=True)
+            self.ws.connect()
         else:
             self.ws = None  # 不使用WebSocket
         # 執行緒池用於後台任務
@@ -925,8 +927,14 @@ class MarketMaker:
                     self.on_ws_message,
                     auto_reconnect=True
                 )
-            elif self.exchange == 'xx':
-                ...
+            elif self.exchange == 'standx':
+                jwt_token = self.exchange_config.get("jwt_token")
+                self.ws = StandXWebSocket(
+                    jwt_token,
+                    self.symbol,
+                    self.on_ws_message,
+                    auto_reconnect=True
+                )
             self.ws.connect()
             
             # 等待連接建立，但不要等太久

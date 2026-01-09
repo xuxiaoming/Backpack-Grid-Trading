@@ -102,6 +102,11 @@ lemon_trader/
   - flask-socketio
   - python-socketio
 
+## Docker 部署（可选）
+
+如果你想用容器运行本项目，可以参考 `docs/DOCKER_DEPLOYMENT.md` 获取完整的镜像构建、Wi
+b 控制枱与 CLI 启动命令，以及 `docker-compose.yml` 示例。
+
 ## 安裝
 
 1. 克隆或下載此代碼庫:

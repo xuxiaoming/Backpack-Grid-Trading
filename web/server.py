@@ -178,6 +178,23 @@ def start_bot():
                 'zk_seeds': zk_seeds,
                 'base_url': base_url,
             }
+        elif exchange == 'standx':
+            jwt_token = os.getenv('STANDX_JWT_TOKEN', '')
+            base_url = os.getenv('STANDX_BASE_URL', 'https://perps.standx.com')
+            ed25519_private_key_bytes = os.getenv('STANDX_ED25519_PRIVATE_KEY_BYTES', '')
+            ed25519_request_id = os.getenv('STANDX_ED25519_REQUEST_ID', '')
+            session_id = os.getenv('STANDX_SESSION_ID', '')
+
+            api_key = ''
+            secret_key = ''
+
+            exchange_config = {
+                'jwt_token': jwt_token,
+                'base_url': base_url,
+                'ed25519_private_key_bytes': ed25519_private_key_bytes,
+                'ed25519_request_id': ed25519_request_id,
+                'session_id': session_id,
+            }
         else:
             return jsonify({'success': False, 'message': f'不支持的交易所: {exchange}'}), 400
 
@@ -188,6 +205,9 @@ def start_bot():
         elif exchange == 'apex':
             if not api_key or not secret_key:
                 return jsonify({'success': False, 'message': 'APEX API密鑰未配置，請檢查環境變量'}), 400
+        elif exchange == 'standx':
+            if not jwt_token:
+                return jsonify({'success': False, 'message': 'StandX JWT Token未配置，請檢查環境變量'}), 400
         else:
             if not api_key or not secret_key:
                 return jsonify({'success': False, 'message': 'API密鑰未配置，請檢查環境變量'}), 400

@@ -252,12 +252,43 @@ class StandXClient(BaseExchangeClient):
         
         return headers
 
+    def _snake_to_camel(self, snake_str: str) -> str:
+        """将 snake_case 字符串转换为 camelCase"""
+        components = snake_str.split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
+    
+    def _convert_keys_to_camel_case(self, data: Any) -> Any:
+        """递归地将字典中的所有 snake_case 键转换为 camelCase
+        
+        注意：此函数会保留原始键，同时添加 camelCase 键，以确保兼容性
+        """
+        if isinstance(data, list):
+            return [self._convert_keys_to_camel_case(item) for item in data]
+        elif isinstance(data, dict):
+            new_dict = {}
+            for k, v in data.items():
+                # 保留原始键
+                new_dict[k] = self._convert_keys_to_camel_case(v)
+                # 如果是 snake_case，添加 camelCase 键
+                if '_' in k:
+                    camel_key = self._snake_to_camel(k)
+                    if camel_key != k:  # 避免重复
+                        new_dict[camel_key] = new_dict[k]
+            return new_dict
+        else:
+            return data
+
     def _normalize_order_fields(self, order: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize order fields to standard format."""
+        # 先进行 snake_case 到 camelCase 的转换
+        order = self._convert_keys_to_camel_case(order)
+        
         if "id" in order and "order_id" not in order:
             order["order_id"] = str(order["id"])
         if "cl_ord_id" in order and "clientId" not in order:
             order["clientId"] = order["cl_ord_id"]
+        elif "clOrdId" in order and "clientId" not in order:
+            order["clientId"] = order["clOrdId"]
 
         # StandX 使用 "buy" 和 "sell"，转换为标准格式
         side = order.get("side")
@@ -558,14 +589,18 @@ class StandXClient(BaseExchangeClient):
         if isinstance(result, dict) and "error" in result:
             return result
 
+        # 转换字段名：snake_case -> camelCase
+        result = self._convert_keys_to_camel_case(result)
+
         # StandX 返回格式
         balances: Dict[str, Dict[str, Any]] = {}
         
         # StandX 使用 DUSD 作为结算资产
-        equity = float(result.get("equity", 0))
-        balance = float(result.get("balance", 0))
-        cross_available = float(result.get("cross_available", 0))
-        locked = float(result.get("locked", 0))
+        # 支持 camelCase 和 snake_case 两种格式
+        equity = float(result.get("equity", result.get("equity", 0)))
+        balance = float(result.get("balance", result.get("balance", 0)))
+        cross_available = float(result.get("crossAvailable") or result.get("cross_available", 0))
+        locked = float(result.get("locked", result.get("locked", 0)))
         
         balances["DUSD"] = {
             "available": cross_available,
@@ -590,11 +625,15 @@ class StandXClient(BaseExchangeClient):
         if isinstance(result, dict) and "error" in result:
             return result
 
+        # 转换字段名：snake_case -> camelCase
+        result = self._convert_keys_to_camel_case(result)
+
+        # 支持 camelCase 和 snake_case 两种格式
         return {
-            "totalCollateral": result.get("balance", "0"),
-            "availableCollateral": result.get("cross_available", "0"),
-            "initialMargin": result.get("cross_margin", "0"),
-            "maintenanceMargin": "0",  # StandX 可能不直接提供
+            "totalCollateral": result.get("balance", result.get("balance", "0")),
+            "availableCollateral": result.get("crossAvailable") or result.get("cross_available", "0"),
+            "initialMargin": result.get("crossMargin") or result.get("cross_margin", "0"),
+            "maintenanceMargin": result.get("maintenanceMargin") or result.get("maintenance_margin", "0"),
             "token": "DUSD",
             "raw": result
         }
@@ -726,6 +765,7 @@ class StandXClient(BaseExchangeClient):
         if not isinstance(orders, list):
             orders = [orders] if orders else []
 
+        # 转换字段名：snake_case -> camelCase，然后标准化订单字段
         normalized: List[Dict[str, Any]] = []
         for item in orders:
             normalized.append(self._normalize_order_fields(dict(item)))
@@ -809,14 +849,39 @@ class StandXClient(BaseExchangeClient):
         if isinstance(result, dict) and "error" in result:
             return result
 
-        # StandX 返回格式
-        data = result
-        if "last_price" not in data and "lastPrice" in data:
-            data["last_price"] = data["lastPrice"]
-        elif "last_price" not in data:
+        # StandX 返回格式为 snake_case，需要转换为标准的 camelCase 格式
+        # 以保持与其他交易所的一致性
+        data = result.copy()
+        
+        # 转换字段名：snake_case -> camelCase
+        # last_price -> lastPrice
+        if "last_price" in data:
+            data["lastPrice"] = data["last_price"]
+        elif "lastPrice" not in data:
             # 使用 mark_price 或 mid_price 作為備選
-            data["last_price"] = data.get("mark_price") or data.get("mid_price") or "0"
-
+            data["lastPrice"] = data.get("mark_price") or data.get("mid_price") or "0"
+        
+        # index_price -> indexPrice
+        if "index_price" in data:
+            data["indexPrice"] = data["index_price"]
+        
+        # mark_price -> markPrice
+        if "mark_price" in data:
+            data["markPrice"] = data["mark_price"]
+        
+        # mid_price -> midPrice
+        if "mid_price" in data:
+            data["midPrice"] = data["mid_price"]
+        
+        # spread_bid -> bidPrice (使用 spread_bid 作为买一价)
+        if "spread_bid" in data:
+            data["bidPrice"] = data["spread_bid"]
+        
+        # spread_ask -> askPrice (使用 spread_ask 作为卖一价)
+        if "spread_ask" in data:
+            data["askPrice"] = data["spread_ask"]
+        
+        # 保留原始字段以确保兼容性
         return data
 
     def get_markets(self) -> Dict[str, Any]:
@@ -881,7 +946,11 @@ class StandXClient(BaseExchangeClient):
 
         # StandX 返回格式: {"page_size": N, "result": [...], "total": N}
         trades = result.get("result", []) if isinstance(result, dict) else result
-        return trades if isinstance(trades, list) else []
+        if not isinstance(trades, list):
+            trades = [trades] if trades else []
+        
+        # 转换字段名：snake_case -> camelCase
+        return self._convert_keys_to_camel_case(trades)
 
     def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> Any:
         """獲取K線數據"""
@@ -927,7 +996,8 @@ class StandXClient(BaseExchangeClient):
         if isinstance(result, dict) and "error" in result:
             return result
 
-        return result
+        # 转换字段名：snake_case -> camelCase
+        return self._convert_keys_to_camel_case(result)
 
     def get_market_limits(self, symbol: str) -> Optional[Dict[str, Any]]:
         """獲取市場限制信息"""
@@ -952,16 +1022,26 @@ class StandXClient(BaseExchangeClient):
         if not symbol_info:
             return None
 
+        # 转换字段名：snake_case -> camelCase
+        symbol_info = self._convert_keys_to_camel_case(symbol_info)
+
         return {
             "symbol": symbol_info.get("symbol"),
-            "base_asset": symbol_info.get("base_asset"),
-            "quote_asset": symbol_info.get("quote_asset"),
+            "baseAsset": symbol_info.get("baseAsset") or symbol_info.get("base_asset"),
+            "quoteAsset": symbol_info.get("quoteAsset") or symbol_info.get("quote_asset"),
+            "base_asset": symbol_info.get("baseAsset") or symbol_info.get("base_asset"),
+            "quote_asset": symbol_info.get("quoteAsset") or symbol_info.get("quote_asset"),
             "market_type": "PERP",
+            "marketType": "PERP",
             "status": "TRADING" if symbol_info.get("enabled") else "INACTIVE",
-            "min_order_size": symbol_info.get("min_order_qty", "0.001"),
-            "tick_size": self._calculate_tick_size(symbol_info.get("price_tick_decimals", 2)),
-            "base_precision": symbol_info.get("qty_tick_decimals", 3),
-            "quote_precision": symbol_info.get("price_tick_decimals", 2),
+            "minOrderSize": symbol_info.get("minOrderQty") or symbol_info.get("min_order_qty", "0.001"),
+            "min_order_size": symbol_info.get("minOrderQty") or symbol_info.get("min_order_qty", "0.001"),
+            "tick_size": self._calculate_tick_size(symbol_info.get("priceTickDecimals") or symbol_info.get("price_tick_decimals", 2)),
+            "tickSize": self._calculate_tick_size(symbol_info.get("priceTickDecimals") or symbol_info.get("price_tick_decimals", 2)),
+            "basePrecision": symbol_info.get("qtyTickDecimals") or symbol_info.get("qty_tick_decimals", 3),
+            "base_precision": symbol_info.get("qtyTickDecimals") or symbol_info.get("qty_tick_decimals", 3),
+            "quotePrecision": symbol_info.get("priceTickDecimals") or symbol_info.get("price_tick_decimals", 2),
+            "quote_precision": symbol_info.get("priceTickDecimals") or symbol_info.get("price_tick_decimals", 2),
         }
 
     def get_positions(self, symbol: Optional[str] = None) -> Any:
@@ -985,6 +1065,9 @@ class StandXClient(BaseExchangeClient):
             return result
 
         positions_raw = result if isinstance(result, list) else []
+        
+        # 转换字段名：snake_case -> camelCase
+        positions_raw = self._convert_keys_to_camel_case(positions_raw)
 
         normalized: List[Dict[str, Any]] = []
         for item in positions_raw:
@@ -996,6 +1079,7 @@ class StandXClient(BaseExchangeClient):
                 if resolved and item_symbol != resolved:
                     continue
 
+            # 支持 camelCase 和 snake_case 两种格式
             raw_qty = item.get("qty", "0") or "0"
             try:
                 pos_dec = Decimal(str(raw_qty))
@@ -1017,8 +1101,9 @@ class StandXClient(BaseExchangeClient):
             long_dec = abs(pos_dec) if mapped_side == "LONG" else Decimal("0")
             short_dec = abs(pos_dec) if mapped_side == "SHORT" else Decimal("0")
 
-            entry_price = item.get("entry_price")
-            unrealized = item.get("upnl")
+            # 支持 camelCase 和 snake_case 两种格式
+            entry_price = item.get("entryPrice") or item.get("entry_price")
+            unrealized = item.get("upnl") or item.get("unrealizedPnl") or item.get("unrealized_pnl")
 
             # netQuantity: 多頭為正，空頭為負
             net_qty = abs(pos_dec) if mapped_side == "LONG" else -abs(pos_dec)
