@@ -30,8 +30,6 @@ class StandXClient(BaseExchangeClient):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key")
-        self.secret_key = config.get("secret_key")
         self.jwt_token = config.get("jwt_token")  # JWT token for authentication
         self.base_url = config.get("base_url", "https://perps.standx.com")
         
@@ -74,18 +72,30 @@ class StandXClient(BaseExchangeClient):
                 # 从十六进制字符串恢复 SigningKey
                 from nacl.signing import SigningKey
                 private_key_bytes = bytes.fromhex(ed25519_private_key_hex)
+                if len(private_key_bytes) != 32:
+                    raise ValueError(f"ed25519 私钥长度不正确: {len(private_key_bytes)} 字节（期望 32 字节）")
                 self._ed25519_private_key = SigningKey(private_key_bytes)
                 self._ed25519_public_key = self._ed25519_private_key.verify_key
-                logger.info("使用认证时生成的 ed25519 密钥对进行 body signature")
+                public_key_bytes = bytes(self._ed25519_public_key)
+                logger.info("✓ 使用认证时生成的 ed25519 密钥对进行 body signature")
             except Exception as e:
-                logger.error(f"无法从配置恢复 ed25519 密钥对: {e}")
+                logger.error(f"✗ 无法从配置恢复 ed25519 密钥对: {e}")
                 logger.warning("将生成新的 ed25519 密钥对（可能导致 body signature 失败）")
                 self._init_body_signature()
         else:
             # 如果没有提供认证时的密钥对，生成新的（可能不工作）
-            logger.warning("⚠️  未提供认证时的 ed25519 密钥对")
-            logger.warning("StandX 的 body signature 需要使用认证时生成的密钥对")
-            logger.warning("请通过配置传入 ed25519_private_key_bytes（认证工具会提供）")
+            logger.error("=" * 60)
+            logger.error("⚠️  未提供认证时的 ed25519 密钥对")
+            logger.error("=" * 60)
+            logger.error("StandX 的 body signature 必须使用认证时生成的同一个 ed25519 密钥对")
+            logger.error("如果使用不同的密钥对，StandX 会返回 'invalid body signature' 错误")
+            logger.error("")
+            logger.error("解决方案：")
+            logger.error("1. 运行认证工具获取 ed25519 密钥对:")
+            logger.error("   python utils/standx_auth.py <private_key>")
+            logger.error("2. 将输出的 ed25519_private_key_bytes 和 ed25519_request_id 添加到 .env 文件")
+            logger.error("3. 确保使用认证时生成的同一个密钥对")
+            logger.error("=" * 60)
             self._init_body_signature()
 
         if self.session_id:
@@ -164,9 +174,6 @@ class StandXClient(BaseExchangeClient):
             version = "v1"
             sign_msg = f"{version},{request_id},{timestamp},{payload}"
             
-            logger.debug(f"Body signature 消息长度: {len(sign_msg)} 字符")
-            logger.debug(f"Body signature 消息预览: {sign_msg[:200]}...")
-            
             # 使用 ed25519 私钥签名
             message_bytes = sign_msg.encode('utf-8')
             
@@ -184,11 +191,6 @@ class StandXClient(BaseExchangeClient):
             # Base64 编码签名（只编码签名部分，不包含消息）
             # StandX 要求只编码签名字节，不包含原始消息
             signature_b64 = base64.b64encode(signed_message.signature).decode('utf-8')
-            
-            logger.debug(f"Body signature 生成成功")
-            logger.debug(f"  签名长度: {len(signed_message.signature)} 字节")
-            logger.debug(f"  Base64 签名长度: {len(signature_b64)} 字符")
-            logger.debug(f"  签名预览: {signature_b64[:50]}...")
             
             return signature_b64
         except Exception as e:
@@ -225,19 +227,19 @@ class StandXClient(BaseExchangeClient):
                 logger.warning("提示：StandX 的 body signature 需要使用 ed25519 密钥对")
                 logger.warning("客户端会自动生成密钥对，但如果认证时注册了密钥对，请通过配置传入")
             else:
-                request_id = self._request_id or str(uuid.uuid4())
+                # Body signature 的 x-request-id 应该是随机字符串（UUID）
+                # 根据 StandX 文档: x-request-id: <random_string>
+                # 注意：认证时的 request_id（base58 编码的公钥）只用于 prepare-signin 步骤
+                # Body signature 的 x-request-id 应该每次都生成新的 UUID
+                request_id = str(uuid.uuid4())
                 timestamp = self._current_timestamp()
 
                 if self.session_id:
                     headers["x-session-id"] = self.session_id
-                    logger.debug(f"Body signature 使用 session_id: {self.session_id}")
                 
                 # 确保 payload 是排序后的 JSON 字符串（StandX 可能要求排序）
                 # 使用 separators 去除空格，确保格式一致
                 payload_str = json.dumps(payload, separators=(',', ':'), sort_keys=True)
-                
-                logger.debug(f"Body signature payload: {payload_str}")
-                logger.debug(f"Body signature request_id: {request_id}, timestamp: {timestamp}")
                 
                 signature = self._sign_request_body(payload_str, request_id, timestamp)
                 if signature:
@@ -245,7 +247,6 @@ class StandXClient(BaseExchangeClient):
                     headers["x-request-id"] = request_id
                     headers["x-request-timestamp"] = str(timestamp)
                     headers["x-request-signature"] = signature
-                    logger.debug(f"Body signature headers 已添加")
                 else:
                     logger.error("生成 body signature 失败，请求可能被拒绝")
         
@@ -394,8 +395,6 @@ class StandXClient(BaseExchangeClient):
         self,
         method: str,
         endpoint: str,
-        api_key: Optional[str] = None,
-        secret_key: Optional[str] = None,
         instruction: Optional[Any] = None,
         params: Optional[Dict[str, Any]] = None,
         data: Optional[Dict[str, Any]] = None,
@@ -414,7 +413,9 @@ class StandXClient(BaseExchangeClient):
 
         for attempt in range(retry_total):
             try:
-                logger.debug("StandX 请求 url=%s method=%s headers=%s params=%s data=%s", url, method_upper, headers, params, data)
+                # 记录请求信息（仅记录关键信息，避免日志过多）
+                logger.debug("StandX 请求 %s %s", method_upper, url)
+                
                 if method_upper in {"GET", "DELETE"}:
                     response = self.session.request(
                         method_upper,
@@ -424,14 +425,30 @@ class StandXClient(BaseExchangeClient):
                         headers=headers,
                     )
                 else:
-                    response = self.session.request(
-                        method_upper,
-                        url,
-                        json=data if data else None,
-                        params=params,
-                        timeout=self.timeout,
-                        headers=headers,
-                    )
+                    # ⚠️ 重要：如果请求需要 body signature，必须确保实际发送的请求体
+                    # 与签名时使用的 JSON 格式完全一致（排序后的 JSON）
+                    # 否则 StandX 服务器验证签名时会失败
+                    if need_body_signature and data:
+                        # 使用与 body signature 相同的序列化方式（排序后的 JSON）
+                        data_json_str = json.dumps(data, separators=(',', ':'), sort_keys=True)
+                        response = self.session.request(
+                            method_upper,
+                            url,
+                            data=data_json_str,  # 使用 data 参数发送字符串，而不是 json 参数
+                            params=params,
+                            timeout=self.timeout,
+                            headers=headers,
+                        )
+                    else:
+                        # 不需要 body signature 的请求，使用 json 参数（自动序列化）
+                        response = self.session.request(
+                            method_upper,
+                            url,
+                            json=data if data else None,
+                            params=params,
+                            timeout=self.timeout,
+                            headers=headers,
+                        )
 
                 if 200 <= response.status_code < 300:
                     return response.json() if response.text else {}
@@ -456,19 +473,47 @@ class StandXClient(BaseExchangeClient):
                         error_type = "Forbidden - Insufficient permissions"
                         # 如果是 body signature 相关的错误，提供更多信息
                         if "signature" in message.lower() or "body" in message.lower():
-                            logger.error("=" * 60)
-                            logger.error("Body signature 验证失败")
-                            logger.error("=" * 60)
+                            logger.error("=" * 80)
+                            logger.error("❌ Body signature 验证失败")
+                            logger.error("=" * 80)
+                            logger.error("")
                             logger.error("可能的原因:")
-                            logger.error("1. StandX 需要在认证时注册 ed25519 密钥对")
-                            logger.error("2. 当前使用的 ed25519 密钥对未在 StandX 注册")
-                            logger.error("3. 签名格式不正确")
+                            logger.error("1. ed25519 密钥对不匹配")
+                            logger.error("   - StandX 的 body signature 必须使用认证时生成的同一个 ed25519 密钥对")
+                            logger.error("   - 如果使用的密钥对与认证时注册的不一致，会验证失败")
+                            logger.error("")
+                            logger.error("2. 密钥对未在 StandX 注册")
+                            logger.error("   - 认证时 StandX 会注册 ed25519 密钥对")
+                            logger.error("   - body signature 必须使用已注册的密钥对")
+                            logger.error("")
+                            logger.error("3. 签名格式问题")
+                            logger.error("   - 签名消息格式: {version},{id},{timestamp},{payload}")
+                            logger.error("   - 签名算法: ed25519")
+                            logger.error("   - 编码格式: Base64")
+                            logger.error("")
+                            logger.error("诊断步骤:")
+                            logger.error("1. 检查是否配置了 STANDX_ED25519_PRIVATE_KEY_BYTES")
+                            logger.error("2. 运行验证工具: python utils/verify_standx_config.py")
+                            logger.error("3. 确认密钥对是认证时生成的（运行认证工具时会输出）")
+                            logger.error("4. 检查认证时的 request_id 是否与配置的 STANDX_ED25519_REQUEST_ID 匹配")
                             logger.error("")
                             logger.error("解决方案:")
-                            logger.error("1. 确保已通过认证工具获取 JWT Token")
-                            logger.error("2. 检查 StandX API 文档: https://docs.standx.com/standx-api/standx-api")
-                            logger.error("3. 联系 StandX 技术支持获取帮助")
-                            logger.error("=" * 60)
+                            logger.error("1. 重新运行认证工具获取 ed25519 密钥对:")
+                            logger.error("   python utils/standx_auth.py <private_key>")
+                            logger.error("2. 将输出的 ed25519_private_key_bytes 和 ed25519_request_id 添加到 .env 文件")
+                            logger.error("3. 确保使用认证时生成的同一个密钥对（不要生成新的）")
+                            logger.error("4. 查看 StandX API 文档: https://docs.standx.com/standx-api/perps-auth")
+                            logger.error("")
+                            logger.error("当前配置状态:")
+                            if hasattr(self, '_ed25519_private_key') and self._ed25519_private_key:
+                                logger.error("  ✓ ed25519 密钥对已初始化")
+                                if self._request_id:
+                                    logger.error(f"  ✓ 认证时的 request_id: {self._request_id}")
+                                else:
+                                    logger.error("  ⚠ 未配置认证时的 request_id")
+                            else:
+                                logger.error("  ✗ ed25519 密钥对未初始化")
+                            logger.error("=" * 80)
                     elif status_code == 404:
                         error_type = "Not Found - Resource not found"
                     elif status_code == 429:
@@ -620,9 +665,13 @@ class StandXClient(BaseExchangeClient):
         }
         payload["time_in_force"] = tif_mapping.get(time_in_force.upper(), "gtc")
 
-        # Reduce only
+        # Reduce only（必需参数）
+        # 根据 StandX 文档，reduce_only 是必需参数
         if "reduceOnly" in order_details:
             payload["reduce_only"] = bool(order_details["reduceOnly"])
+        else:
+            # 如果没有提供，默认为 False
+            payload["reduce_only"] = False
 
         # Client order ID
         if "clientId" in order_details:
@@ -634,7 +683,6 @@ class StandXClient(BaseExchangeClient):
         if "marginMode" in order_details:
             payload["margin_mode"] = order_details["marginMode"].lower()
 
-        logger.debug("StandX 下单请求 payload: %s", payload)
         result = self.make_request(
             "POST",
             "/api/new_order",

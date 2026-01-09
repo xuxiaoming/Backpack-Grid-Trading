@@ -161,8 +161,7 @@ def main():
             'base_url': base_url,
         }
     elif exchange == 'standx':
-        api_key = os.getenv('STANDX_API_KEY', '')
-        secret_key = os.getenv('STANDX_SECRET_KEY', '')
+        # StandX 使用 JWT token 认证，不需要 API key/secret key
         jwt_token = os.getenv('STANDX_JWT_TOKEN', '')
         base_url = os.getenv('STANDX_BASE_URL', 'https://perps.standx.com')
         # ⚠️ 重要：StandX 的 body signature 必须使用认证时生成的 ed25519 密钥对
@@ -171,8 +170,6 @@ def main():
         session_id = os.getenv('STANDX_SESSION_ID', '')
 
         exchange_config = {
-            'api_key': api_key,
-            'secret_key': secret_key,
             'jwt_token': jwt_token,
             'base_url': base_url,
             'ed25519_private_key_bytes': ed25519_private_key_bytes,
@@ -200,11 +197,11 @@ def main():
             logger.error("缺少 APEX API 密鑰，請通過環境變量 APEX_API_KEY 和 APEX_SECRET_KEY 提供")
             sys.exit(1)
     elif exchange == 'standx':
-        if not api_key or not secret_key:
-            logger.error("缺少 StandX API 密鑰，請通過環境變量 STANDX_API_KEY 和 STANDX_SECRET_KEY 提供")
-            sys.exit(1)
+        # StandX 使用 JWT token 认证，不需要 API key/secret key
         if not jwt_token:
-            logger.warning("未提供 StandX JWT Token，某些功能可能無法使用。請通過環境變量 STANDX_JWT_TOKEN 提供")
+            logger.error("缺少 StandX JWT Token，請通過環境變量 STANDX_JWT_TOKEN 提供")
+            logger.error("获取 JWT Token 的方法：运行 python utils/standx_auth.py <private_key>")
+            sys.exit(1)
     else:
         if not api_key or not secret_key:
             logger.error("缺少API密鑰，請通過命令行參數或環境變量提供")

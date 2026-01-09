@@ -85,14 +85,9 @@ def _resolve_api_credentials(exchange: str, api_key: Optional[str], secret_key: 
             os.getenv("APEX_SECRET_KEY"),
         ]
     elif exchange == "standx":
-        api_candidates = [
-            os.getenv("STANDX_API_KEY"),
-            os.getenv("STANDX_KEY"),
-        ]
-        secret_candidates = [
-            os.getenv("STANDX_SECRET_KEY"),
-            os.getenv("STANDX_SECRET"),
-        ]
+        # StandX 使用 JWT token 认证，不需要 API key/secret key
+        api_candidates = []
+        secret_candidates = []
     else:
         api_candidates = [
             os.getenv("BACKPACK_KEY"),
@@ -163,12 +158,9 @@ def _get_client(api_key=None, secret_key=None, exchange='backpack', exchange_con
             config['zk_seeds'] = os.getenv('APEX_ZK_SEEDS', '')
         if 'base_url' not in config:
             config['base_url'] = os.getenv('APEX_BASE_URL', 'https://omni.apex.exchange')
-    # StandX 需要 jwt_token
+    # StandX 使用 JWT token 认证，不需要 API key/secret key
     elif exchange == 'standx':
-        if config_api_key:
-            config['api_key'] = config_api_key
-        if config_secret_key:
-            config['secret_key'] = config_secret_key
+        # StandX 不使用传统的 API key/secret key，只使用 JWT token
         if 'jwt_token' not in config:
             config['jwt_token'] = os.getenv('STANDX_JWT_TOKEN', '')
         if 'base_url' not in config:
@@ -217,11 +209,9 @@ def _get_client(api_key=None, secret_key=None, exchange='backpack', exchange_con
             else 'public'
         )
     elif exchange == 'standx':
-        # StandX使用api_key/secret_key/jwt_token
+        # StandX 使用 JWT token 认证，不需要 API key/secret key
         cache_suffix = (
-            f"{config.get('api_key', '')}_{config.get('secret_key', '')}_{config.get('jwt_token', '')}"
-            if config.get('api_key') or config.get('secret_key') or config.get('jwt_token')
-            else 'public'
+            config.get('jwt_token', '')[:20] if config.get('jwt_token') else 'public'
         )
     else:
         # 其他交易所使用api_key/secret_key

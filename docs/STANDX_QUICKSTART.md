@@ -39,9 +39,9 @@
 STANDX_JWT_TOKEN=your_jwt_token_here
 STANDX_BASE_URL=https://perps.standx.com
 
-# 可选（如果 StandX 需要）
-STANDX_API_KEY=your_api_key_here
-STANDX_SECRET_KEY=your_secret_key_here
+# StandX Body Signature（必需，用于签名请求）
+STANDX_ED25519_PRIVATE_KEY_BYTES=your_ed25519_private_key_hex
+STANDX_ED25519_REQUEST_ID=your_ed25519_request_id
 ```
 
 **重要提示**：

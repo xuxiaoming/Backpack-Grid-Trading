@@ -62,6 +62,100 @@ class StandXAuth:
         # 生成临时的 ed25519 密钥对
         self._generate_ed25519_keypair()
     
+    def _mask_sensitive_data(self, data: Any, max_show: int = 20) -> Any:
+        """
+        隐藏敏感数据，只显示前后部分
+        
+        Args:
+            data: 要处理的数据（字符串或字典）
+            max_show: 显示的最大字符数（前后各显示 max_show 个字符）
+            
+        Returns:
+            处理后的数据
+        """
+        if isinstance(data, str):
+            if len(data) <= max_show * 2:
+                return data
+            return f"{data[:max_show]}...{data[-max_show:]}"
+        elif isinstance(data, dict):
+            masked = {}
+            sensitive_keys = ['signature', 'signedData', 'token', 'private_key', 'secret']
+            for key, value in data.items():
+                if any(sensitive in key.lower() for sensitive in sensitive_keys):
+                    if isinstance(value, str):
+                        masked[key] = self._mask_sensitive_data(value, max_show)
+                    else:
+                        masked[key] = value
+                else:
+                    masked[key] = value
+            return masked
+        return data
+    
+    def _print_request(self, method: str, url: str, headers: Dict[str, str] = None, 
+                       payload: Any = None, params: Dict[str, str] = None):
+        """打印请求信息"""
+        print("\n" + "=" * 80)
+        print("📤 StandX API 请求")
+        print("=" * 80)
+        print(f"方法: {method}")
+        print(f"URL: {url}")
+        
+        if params:
+            print(f"查询参数: {json.dumps(params, indent=2, ensure_ascii=False)}")
+        
+        if headers:
+            print(f"请求头:")
+            for key, value in headers.items():
+                # 隐藏敏感信息
+                if 'authorization' in key.lower() or 'token' in key.lower():
+                    print(f"  {key}: {self._mask_sensitive_data(value)}")
+                else:
+                    print(f"  {key}: {value}")
+        
+        if payload:
+            print(f"请求体:")
+            if isinstance(payload, dict):
+                masked_payload = self._mask_sensitive_data(payload)
+                print(json.dumps(masked_payload, indent=2, ensure_ascii=False))
+            else:
+                print(self._mask_sensitive_data(str(payload)))
+        
+        print("=" * 80)
+    
+    def _print_response(self, status_code: int, headers: Dict[str, str] = None, 
+                        response_data: Any = None, response_text: str = None):
+        """打印响应信息"""
+        print("\n" + "=" * 80)
+        print("📥 StandX API 响应")
+        print("=" * 80)
+        print(f"状态码: {status_code}")
+        
+        if headers:
+            print(f"响应头:")
+            for key, value in headers.items():
+                print(f"  {key}: {value}")
+        
+        if response_data:
+            print(f"响应体 (JSON):")
+            masked_data = self._mask_sensitive_data(response_data)
+            print(json.dumps(masked_data, indent=2, ensure_ascii=False))
+        
+        if response_text and not response_data:
+            print(f"响应体 (文本):")
+            # 尝试解析为 JSON
+            try:
+                text_data = json.loads(response_text)
+                masked_text = self._mask_sensitive_data(text_data)
+                print(json.dumps(masked_text, indent=2, ensure_ascii=False))
+            except:
+                # 如果不是 JSON，直接显示（可能很长，只显示前500字符）
+                if len(response_text) > 500:
+                    print(f"{response_text[:500]}...")
+                else:
+                    print(response_text)
+        
+        print("=" * 80 + "\n")
+    
     def _generate_ed25519_keypair(self):
         """生成临时的 ed25519 密钥对"""
         if not HAS_NACL:
@@ -93,7 +187,8 @@ class StandXAuth:
         Returns:
             signedData (JWT 字符串) 或 None
         """
-        url = f"{self.base_url}/v1/offchain/prepare-signin?chain={chain}"
+        url = f"{self.base_url}/v1/offchain/prepare-signin"
+        params = {"chain": chain}
         
         payload = {
             "address": wallet_address,
@@ -104,15 +199,35 @@ class StandXAuth:
             "Content-Type": "application/json"
         }
         
+        # 打印请求信息
+        self._print_request("POST", url, headers=headers, payload=payload, params=params)
+        
         try:
             print(f"正在请求签名数据 (chain={chain}, address={wallet_address})...")
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            response = requests.post(url, json=payload, headers=headers, params=params, timeout=10)
+            
+            # 打印响应信息
+            response_data = None
+            try:
+                response_data = response.json()
+            except:
+                pass
+            
+            self._print_response(
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                response_data=response_data,
+                response_text=response.text if not response_data else None
+            )
             
             if response.status_code == 200:
-                data = response.json()
-                if data.get("success"):
+                data = response_data
+                if data and data.get("success"):
                     signed_data = data.get("signedData")
                     print("✓ 成功获取签名数据")
+                    if signed_data:
+                        print(f"  signedData 长度: {len(signed_data)} 字符")
+                        print(f"  signedData 预览: {signed_data[:50]}...{signed_data[-50:]}")
                     return signed_data
                 else:
                     print(f"请求失败: {data}")
@@ -136,19 +251,44 @@ class StandXAuth:
             StandX 的公钥（PEM 格式）或 None
         """
         url = f"{self.base_url}/v1/offchain/certs"
+        headers = {}
+        
+        # 打印请求信息
+        self._print_request("GET", url, headers=headers)
         
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            # 打印响应信息
+            response_text = response.text.strip()
+            response_data = None
+            try:
+                response_data = response.json()
+            except:
+                pass
+            
+            self._print_response(
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                response_data=response_data,
+                response_text=response_text if not response_data else None
+            )
+            
             if response.status_code == 200:
                 # 返回的公钥可能是 PEM 格式或其他格式
-                public_key = response.text.strip()
+                public_key = response_text
                 print(f"✓ 成功获取 StandX 验证公钥")
+                if public_key:
+                    print(f"  公钥长度: {len(public_key)} 字符")
+                    print(f"  公钥预览: {public_key[:100]}...")
                 return public_key
             else:
                 print(f"获取验证公钥失败: HTTP {response.status_code}")
                 return None
         except Exception as e:
             print(f"获取验证公钥失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def parse_jwt(self, token: str, verify: bool = False) -> Optional[Dict[str, Any]]:
@@ -190,13 +330,23 @@ class StandXAuth:
             payload = jwt.decode(token, options={"verify_signature": False})
             
             # 显示解析的 payload 信息（用于调试）
+            print("\n" + "=" * 80)
+            print("🔍 解析 JWT Token")
+            print("=" * 80)
+            print(f"JWT Token 长度: {len(token)} 字符")
+            print(f"JWT Token 预览: {token[:50]}...{token[-50:]}")
+            print(f"\nJWT Payload 内容:")
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            
             if payload.get("message"):
-                print(f"✓ 成功解析 JWT payload")
+                print(f"\n✓ 成功解析 JWT payload")
                 print(f"  域名: {payload.get('domain', 'N/A')}")
                 print(f"  地址: {payload.get('address', 'N/A')}")
                 print(f"  请求ID: {payload.get('requestId', 'N/A')}")
                 print(f"  消息长度: {len(payload.get('message', ''))} 字符")
+                print(f"  消息预览: {payload.get('message', '')[:100]}...")
             
+            print("=" * 80 + "\n")
             return payload
         except Exception as e:
             print(f"解析 JWT 失败: {e}")
@@ -219,12 +369,21 @@ class StandXAuth:
             raise ImportError("需要安装 eth-account: pip install eth-account web3")
         
         try:
+            # 打印签名信息
+            print("\n" + "=" * 80)
+            print("✍️  钱包签名")
+            print("=" * 80)
+            print(f"消息长度: {len(message)} 字符")
+            print(f"消息预览: {message[:100]}...{message[-50:]}")
+            print(f"私钥预览: {self._mask_sensitive_data(private_key)}")
+            
             # 确保私钥格式正确
             if not private_key.startswith("0x"):
                 private_key = "0x" + private_key
             
             # 创建账户对象
             account = Account.from_key(private_key)
+            print(f"钱包地址: {account.address}")
             
             # 使用 eth_account 进行签名（EIP-191 格式）
             # encode_defunct 会自动添加 "\x19Ethereum Signed Message:\n{len(message)}" 前缀
@@ -268,7 +427,10 @@ class StandXAuth:
             except Exception as e:
                 print(f"警告: 无法验证签名: {e}")
             
-            print("✓ 成功签名消息")
+            print(f"✓ 成功签名消息")
+            print(f"签名长度: {len(signature)} 字符")
+            print(f"签名预览: {signature[:30]}...{signature[-30:]}")
+            print("=" * 80 + "\n")
             return signature
             
         except Exception as e:
@@ -290,7 +452,8 @@ class StandXAuth:
         Returns:
             登录响应字典，包含 token 等信息
         """
-        url = f"{self.base_url}/v1/offchain/login?chain={chain}"
+        url = f"{self.base_url}/v1/offchain/login"
+        params = {"chain": chain}
         
         payload = {
             "signature": signature,
@@ -302,14 +465,38 @@ class StandXAuth:
             "Content-Type": "application/json"
         }
         
+        # 打印请求信息
+        self._print_request("POST", url, headers=headers, payload=payload, params=params)
+        
         try:
             print("正在登录获取访问令牌...")
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            response = requests.post(url, json=payload, headers=headers, params=params, timeout=10)
+            
+            # 打印响应信息
+            response_data = None
+            try:
+                response_data = response.json()
+            except:
+                pass
+            
+            self._print_response(
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                response_data=response_data,
+                response_text=response.text if not response_data else None
+            )
             
             if response.status_code == 200:
-                data = response.json()
-                if "token" in data:
+                data = response_data
+                if data and "token" in data:
                     print("✓ 成功获取访问令牌")
+                    if data.get("token"):
+                        token_preview = self._mask_sensitive_data(data["token"])
+                        print(f"  Token 预览: {token_preview}")
+                    if data.get("address"):
+                        print(f"  地址: {data['address']}")
+                    if data.get("chain"):
+                        print(f"  链: {data['chain']}")
                     return data
                 else:
                     print(f"登录响应格式异常: {data}")
@@ -319,8 +506,8 @@ class StandXAuth:
                 
                 # 尝试解析错误信息
                 try:
-                    error_data = response.json()
-                    error_msg = error_data.get("message", error_text)
+                    error_data = response_data or response.json()
+                    error_msg = error_data.get("message", error_text) if isinstance(error_data, dict) else error_text
                     print(f"错误详情: {error_msg}")
                     
                     # 如果是签名验证失败，提供更多调试信息

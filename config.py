@@ -60,9 +60,7 @@ PARADEX_JWT_REFRESH_BUFFER = int(os.getenv('PARADEX_JWT_REFRESH_BUFFER', '120'))
 
 # ==================== StandX 交易所配置 ====================
 
-# StandX API 憑證
-STANDX_API_KEY = os.getenv('STANDX_API_KEY') or os.getenv('STANDX_KEY')
-STANDX_SECRET_KEY = os.getenv('STANDX_SECRET_KEY') or os.getenv('STANDX_SECRET')
+# StandX 使用 JWT token 认证，不需要传统的 API key/secret key
 STANDX_JWT_TOKEN = os.getenv('STANDX_JWT_TOKEN')  # JWT token for authentication
 
 # StandX Body Signature（ed25519 密钥对）
