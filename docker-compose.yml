@@ -6,9 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env
-    volumes:
-      - ./market_maker.log:/app/market_maker.log
-      - ./orders.db:/app/orders.db
+    # 去掉 volumes 挂载，避免文件夹冲突
     restart: always
     command: [
       "--exchange", "standx",
