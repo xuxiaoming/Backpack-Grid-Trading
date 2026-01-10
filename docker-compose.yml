@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  backpack-bot:
+  standx-bot:
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +9,18 @@ services:
     volumes:
       - ./market_maker.log:/app/market_maker.log
       - ./orders.db:/app/orders.db
-    ports:
-      - "5000:5000"
-    command: ["--web"]
+    restart: always
+    command: [
+      "--exchange", "standx",
+      "--market-type", "perp",
+      "--symbol", "BTC-USD",
+      "--strategy", "perp_grid",
+      "--grid-type", "neutral",
+      "--auto-price",
+      "--price-range", "1",
+      "--grid-num", "40",
+      "--quantity", "0.002",
+      "--max-position", "2.0",
+      "--duration", "3600000",
+      "--interval", "14"
+    ]

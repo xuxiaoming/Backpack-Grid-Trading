@@ -9,6 +9,7 @@
 | 交易所 | 現貨做市 | 永續做市 | 永續對沖 | 現貨網格 | 合約網格 | 邀請連結 |
 |:------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
 | **Backpack** | ✅ | ✅ | ✅ | ✅ | ✅ | [註冊連結](https://backpack.exchange/refer/yan) |
+| **StandX** | ❌ | ✅ | ✅ | ❌ | ✅ | [註冊連結](https://app.standx.com/) |
 | **Aster** | ❌ | ✅ | ✅ | ❌ | ✅ | [註冊連結](https://www.asterdex.com/referral/1a7b6E) |
 | **Paradex** | ❌ | ✅ | ✅ | ❌ | ✅ | [註冊連結](https://app.paradex.trade/r/yanowo) |
 | **Lighter** | ❌ | ✅ | ✅ | ❌ | ✅ | [註冊連結](https://app.lighter.xyz/?referral=YANOWO) |
@@ -102,10 +103,37 @@ lemon_trader/
   - flask-socketio
   - python-socketio
 
-## Docker 部署（可选）
+## Docker 部署與伺服器運作
 
-如果你想用容器运行本项目，可以参考 `docs/DOCKER_DEPLOYMENT.md` 获取完整的镜像构建、Wi
-b 控制枱与 CLI 启动命令，以及 `docker-compose.yml` 示例。
+本項目完整支援 Docker 容器化部署，適合在雲端伺服器（VPS）上 7x24 小時穩定執行。
+
+### 1. 快速構建鏡像
+```bash
+docker build -t backpack-mm .
+```
+
+### 2. 伺服器部署步驟 (Docker Compose)
+
+這是最推薦的生產環境部署方式：
+
+1.  **環境準備**：確保伺服器已安裝 Docker 和 Docker Compose。
+2.  **上傳代碼**：透過 `git clone` 或 `scp` 將項目上傳至伺服器。
+3.  **配置環境**：
+    *   複製 `.env.example` 為 `.env`。
+    *   **重要**：填入你的 StandX JWT、ed25519 密鑰等必要資訊。
+4.  **啟動運行**：
+    ```bash
+    # 後台構建並啟動
+    docker compose up -d --build
+    ```
+
+### 3. 常用維護命令
+*   **查看日誌**：`docker compose logs -f`
+*   **停止運行**：`docker compose down`
+*   **重啟服務**：`docker compose restart`
+*   **訪問控制枱**：`http://伺服器IP:5000`
+
+更多詳細資訊請參閱 [Docker 部署文檔](docs/DOCKER_DEPLOYMENT.md)。
 
 ## 安裝
 
