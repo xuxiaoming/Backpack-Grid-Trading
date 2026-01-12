@@ -131,7 +131,6 @@ class PerpetualMarketMaker(MarketMaker):
         qty = round_to_precision(abs(quantity), self.base_precision)
         if qty < self.min_order_size: return {"error": "too_small"}
 
-        # ⚠️ 硬拦截：如果是非减仓单，且当前仓位已达上限，禁止下单
         if not reduce_only:
             net = self.get_net_position()
             if (side == "Bid" and net >= self.max_position) or (side == "Ask" and net <= -self.max_position):
@@ -143,20 +142,25 @@ class PerpetualMarketMaker(MarketMaker):
             "quantity": str(qty),
             "side": side,
             "symbol": self.symbol,
-            "reduceOnly": reduce_only,
+            "reduce_only": reduce_only, # StandX 使用下划线
         }
         if normalized_order_type == "Limit":
             order_details["price"] = str(round_to_tick_size(price, self.tick_size))
-            order_details["postOnly"] = True 
+            # ⚠️ 修复：同时发送多种命名方式，确保 StandX 正确拦截 Taker
+            order_details["post_only"] = True
+            order_details["postOnly"] = True
+            order_details["time_in_force"] = "gtc"
+            order_details["timeInForce"] = "gtc"
 
         result = self.client.execute_order(order_details)
         if isinstance(result, dict) and "error" in result:
             logger.error(f"下單失敗: {result['error']}")
         else:
-            logger.info(f"下單成功: {side} {qty} @ {price or 'Market'}")
+            logger.info(f"下單成功 (Maker): {side} {qty} @ {price or 'Market'}")
         return result
 
     def close_position(self, quantity=None, price=None, order_type="Market"):
+        # 除非是风控强制减仓，否则 close_position 理论上由 calculate_prices 的偏移来完成
         net = self.get_net_position()
         if abs(net) < self.min_order_size: return False
         
@@ -164,6 +168,6 @@ class PerpetualMarketMaker(MarketMaker):
         qty = abs(net) if quantity is None else min(abs(quantity), abs(net))
         
         return self.open_position(side=order_side, quantity=qty, price=price, order_type=order_type, reduce_only=True)
+
     def run(self, duration_seconds=3600, interval_seconds=60):
         super().run(duration_seconds, interval_seconds)
-
