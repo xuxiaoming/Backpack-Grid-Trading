@@ -12,13 +12,12 @@ services:
       "--exchange", "standx",
       "--market-type", "perp",
       "--symbol", "BTC-USD",
-      "--strategy", "perp_grid",
-      "--grid-type", "neutral",
-      "--auto-price",
-      "--price-range", "1",
-      "--grid-num", "30",
-      "--quantity", "0.0035",
-      "--max-position", "2.0",
-      "--duration", "3600000",
-      "--interval", "14"
+      "--strategy", "standard",
+      "--spread", "0.10",
+      "--quantity", "0.02",
+      "--max-orders", "1",
+      "--inventory-skew", "0.8",
+      "--max-position", "0.1",
+      "--interval", "6",
+      "--enable-rebalance"
     ]
