@@ -694,23 +694,32 @@ class StandXClient(BaseExchangeClient):
             pass
 
         # Time in force (StandX 支持: gtc, ioc, alo)
-        time_in_force = order_details.get("timeInForce", "GTC")
-        tif_mapping = {
-            "GTC": "gtc",
-            "IOC": "ioc",
-            "FOK": "ioc",  # StandX 不支持 FOK，使用 IOC
-            "POST_ONLY": "alo",  # StandX 使用 alo (Add Liquidity Only) 代替 post_only
-            "ALO": "alo",
-        }
-        payload["time_in_force"] = tif_mapping.get(time_in_force.upper(), "gtc")
+        # 兼容多种写法：timeInForce, time_in_force, post_only
+        tif_raw = order_details.get("time_in_force") or order_details.get("timeInForce")
+        post_only_raw = order_details.get("post_only") or order_details.get("postOnly")
+        
+        # 如果 post_only 明确为 True，强制使用 alo
+        if post_only_raw is True:
+            time_in_force = "alo"
+        elif tif_raw:
+            tif_mapping = {
+                "GTC": "gtc",
+                "IOC": "ioc",
+                "FOK": "ioc",
+                "POST_ONLY": "alo",
+                "ALO": "alo",
+                "POSTONLY": "alo"
+            }
+            time_in_force = tif_mapping.get(str(tif_raw).upper(), "gtc")
+        else:
+            time_in_force = "gtc"
+            
+        payload["time_in_force"] = time_in_force
 
         # Reduce only（必需参数）
-        # 根据 StandX 文档，reduce_only 是必需参数
-        if "reduceOnly" in order_details:
-            payload["reduce_only"] = bool(order_details["reduceOnly"])
-        else:
-            # 如果没有提供，默认为 False
-            payload["reduce_only"] = False
+        # 兼容多种写法：reduceOnly, reduce_only
+        reduce_only_raw = order_details.get("reduce_only") or order_details.get("reduceOnly")
+        payload["reduce_only"] = bool(reduce_only_raw) if reduce_only_raw is not None else False
 
         # Client order ID
         if "clientId" in order_details:

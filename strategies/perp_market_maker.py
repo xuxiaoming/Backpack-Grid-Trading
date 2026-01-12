@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import math
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
+from concurrent.futures import ThreadPoolExecutor
 
 from logger import setup_logger
 from strategies.market_maker import MarketMaker, format_balance
@@ -24,150 +26,267 @@ class PerpetualMarketMaker(MarketMaker):
         symbol: str,
         target_position: float = 0.0,
         max_position: float = 1.0,
-        position_threshold: float = 0.1,
         inventory_skew: float = 0.0,
-        leverage: float = 1.0,
-        stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None,
-        exchange: str = 'backpack',
-        exchange_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
-        kwargs.setdefault("enable_rebalance", False)
+        # 版本标识
+        logger.info(">>> PerpetualMarketMaker 启动 [2026-01-12 深度加固版 v3.3] <<<")
+        
+        self.position_threshold = kwargs.pop("position_threshold", 0.1)
+        self.leverage = kwargs.pop("leverage", 1.0)
+        self.stop_loss = kwargs.pop("stop_loss", None)
+        self.take_profit = kwargs.pop("take_profit", None)
+        
+        # 允许从外部参数（如 --enable-rebalance）开启重平衡
+        if "enable_rebalance" not in kwargs:
+            kwargs["enable_rebalance"] = False
+        
         super().__init__(
             api_key=api_key,
             secret_key=secret_key,
             symbol=symbol,
-            exchange=exchange,
-            exchange_config=exchange_config,
             **kwargs,
         )
 
         self.target_position = abs(target_position)
         self.max_position = max(abs(max_position), self.min_order_size)
-        self.position_threshold = max(position_threshold, self.min_order_size)
         self.inventory_skew = max(0.0, min(1.0, inventory_skew))
-        self.leverage = max(1.0, leverage)
-        self.stop_loss = abs(stop_loss) if stop_loss not in (None, 0) else None
-        self.take_profit = abs(take_profit) if take_profit and take_profit > 0 else None
         
-        self.position_state: Dict[str, Any] = {"net": 0.0, "avg_entry": 0.0, "direction": "FLAT", "unrealized": 0.0}
-        self.total_volume_quote = 0.0
-        self.session_total_volume_quote = 0.0
-
+        self.position_state: Dict[str, Any] = {"net": 0.0, "direction": "FLAT"}
         self._update_position_state()
 
     def get_net_position(self) -> float:
-        """取得目前的永續合約淨倉位。"""
         try:
             result = self.client.get_positions(self.symbol)
-            if isinstance(result, dict) and "error" in result:
-                return 0.0
-            if not isinstance(result, list) or not result:
-                return 0.0
-            return float(result[0].get("netQuantity", 0))
-        except:
+            if not isinstance(result, list) or not result: return 0.0
+            net = float(result[0].get("netQuantity", 0))
+            return net
+        except Exception as e:
+            logger.error(f"获取仓位异常: {e}")
             return 0.0
 
     def _update_position_state(self, current_price: Optional[float] = None) -> None:
         net = self.get_net_position()
-        if current_price is None:
-            current_price = self.get_current_price()
-        
         self.position_state = {
             "net": net,
             "direction": "LONG" if net > 0 else "SHORT" if net < 0 else "FLAT",
-            "target": self.target_position,
             "max_position": self.max_position,
-            "current_price": current_price or 0.0,
         }
 
     def manage_positions(self) -> bool:
-        """風控管理：僅在超過最大持倉時才執行強制平倉。"""
+        """风控减仓：不再使用市价单，改为使用带保护的限价单"""
         net = self.get_net_position()
-        current_size = abs(net)
+        if abs(net) > self.max_position:
+            excess = abs(net) - self.max_position
+            logger.warning(f"【风控拦截】仓位 {abs(net):.4f} 超过限制 {self.max_position}，尝试以 Maker 方式减仓: {excess:.4f}")
+            
+            # 价格设置在对手盘价格之后，确保 Maker
+            bid, ask = self.get_market_depth()
+            price = (ask + self.tick_size) if net > 0 else (bid - self.tick_size)
+            
+            return self.open_position(
+                side="Ask" if net > 0 else "Bid", 
+                quantity=excess, 
+                price=price,
+                order_type="Limit", 
+                reduce_only=True
+            )
+        return False
+
+    def need_rebalance(self) -> bool:
+        """永续合约重平衡：检查持仓是否偏离目标仓位超过阈值"""
+        if not self.enable_rebalance:
+            return False
         
-        if current_size > self.max_position:
-            excess = current_size - self.max_position
-            logger.warning(f"【風控】持倉 {current_size} 超過上限 {self.max_position}，市價平掉多餘部分 {excess}")
-            return self.close_position(quantity=excess, order_type="Market")
+        net = self.get_net_position()
+        deviation = abs(net - self.target_position)
         
+        if deviation > self.position_threshold:
+            logger.info(f"永续重平衡检查: 当前持仓 {net:.4f}, 目标 {self.target_position:.4f}, 偏差 {deviation:.4f} > 阈值 {self.position_threshold}")
+            return True
+        return False
+
+    def rebalance_position(self) -> bool:
+        """永续合约重平衡：强制改为使用限价单（Maker）回归目标仓位"""
+        net = self.get_net_position()
+        diff = net - self.target_position
+        
+        if abs(diff) > self.min_order_size:
+            side = "Ask" if diff > 0 else "Bid"
+            qty = abs(diff)
+            
+            # 计算一个安全的 Maker 价格
+            bid, ask = self.get_market_depth()
+            if not bid or not ask: return False
+            price = (ask + self.tick_size) if side == "Ask" else (bid - self.tick_size)
+            
+            logger.warning(f"【重平衡】尝试以 Maker 方式回归目标: {side} {qty:.4f} @ {price}")
+            
+            return self.open_position(
+                side=side, 
+                quantity=qty, 
+                price=price, 
+                order_type="Limit", 
+                reduce_only=True
+            )
         return False
 
     def calculate_prices(self):
-        """核心邏輯：計算掛單價格並執行微小偏移。"""
         buy_prices, sell_prices = super().calculate_prices()
-        if not buy_prices or not sell_prices:
-            return buy_prices, sell_prices
+        if not buy_prices or not sell_prices: return buy_prices, sell_prices
 
         net = self.get_net_position()
         bid_price, ask_price = self.get_market_depth()
         current_price = (bid_price + ask_price) / 2 if (bid_price and ask_price) else self.get_current_price()
-        if not current_price:
-            return buy_prices, sell_prices
+        if not current_price: return buy_prices, sell_prices
 
-        if abs(net) < (self.min_order_size / 100) or abs(net) < 0.0001:
-            return buy_prices, sell_prices
-
+        # 1. 基础偏移计算
         skew_ratio = max(-1.0, min(1.0, net / self.max_position))
         max_skew_percent = 0.005 
         skew_offset = current_price * max_skew_percent * self.inventory_skew * skew_ratio
 
-        adjusted_buys = [round_to_tick_size(p - skew_offset, self.tick_size) for p in buy_prices]
-        adjusted_sells = [round_to_tick_size(p - skew_offset, self.tick_size) for p in sell_prices]
+        # 2. 预调价格
+        raw_buys = [p - skew_offset for p in buy_prices]
+        raw_sells = [p - skew_offset for p in sell_prices]
 
-        logger.info(f"=== 價格計算 ===")
-        logger.info(f"當前倉位: {net:.4f} | 偏移比例: {skew_ratio:.2%} | 偏移金額: {skew_offset:.2f}")
-        logger.info(f"原始報價: 買 {buy_prices[0]:.2f} | 賣 {sell_prices[0]:.2f}")
-        logger.info(f"調整報價: 買 {adjusted_buys[0]:.2f} | 賣 {adjusted_sells[0]:.2f}")
+        # 3. 核心：强制价格必须在盘口之外（Maker 物理保护）
+        # 即使 skew 算出要挂在对手盘里，也要强行压回到盘口 1 个 tick 处
+        if bid_price and ask_price:
+            safe_bid_boundary = bid_price
+            safe_ask_boundary = ask_price
+            
+            adjusted_buys = [round_to_tick_size(min(p, safe_bid_boundary), self.tick_size) for p in raw_buys]
+            adjusted_sells = [round_to_tick_size(max(p, safe_ask_boundary), self.tick_size) for p in raw_sells]
+        else:
+            adjusted_buys = [round_to_tick_size(p, self.tick_size) for p in raw_buys]
+            adjusted_sells = [round_to_tick_size(p, self.tick_size) for p in raw_sells]
 
-        if adjusted_buys[0] >= adjusted_sells[0]:
-            return buy_prices, sell_prices
+        # 增加詳細日志
+        if abs(net) >= 0.0001:
+            logger.info(f"=== 价格计算详情 ===")
+            logger.info(f"当前持仓: {net:.4f} | 偏移比例: {skew_ratio:.2%}")
+            logger.info(f"原始中间价: {current_price:.2f} | 偏移金额: {skew_offset:.4f}")
+            logger.info(f"盘口边界: 买 {bid_price} | 卖 {ask_price}")
+            logger.info(f"最终挂单: 买 {adjusted_buys[0]:.2f} | 卖 {adjusted_sells[0]:.2f}")
 
         return adjusted_buys, adjusted_sells
+
+    def place_limit_orders(self):
+        """下限价单（永续合约重写版：强制走 open_position 以确保 Maker 保护）"""
+        self.check_ws_connection()
+        
+        # 1. 强制风控检查（已改为 Maker 模式）
+        self.manage_positions()
+        
+        self.cancel_existing_orders()
+        
+        buy_prices, sell_prices = self.calculate_prices()
+        if not buy_prices or not sell_prices:
+            logger.error("無法計算訂單價格，跳過下單")
+            return
+        
+        # 确定下单数量
+        if self.order_quantity is not None:
+            qty = max(self.min_order_size, round_to_precision(self.order_quantity, self.base_precision))
+        else:
+            # 如果没设数量，默认计算逻辑（参考基类）
+            _, base_total = self.get_asset_balance(self.base_asset)
+            _, quote_total = self.get_asset_balance(self.quote_asset)
+            avg_price = (buy_prices[0] + sell_prices[0]) / 2
+            allocation = min(0.05, 1.0 / (self.max_orders * 4))
+            qty = max(self.min_order_size, round_to_precision((quote_total * allocation) / avg_price, self.base_precision))
+
+        # 并发执行下单
+        buy_count = 0
+        with ThreadPoolExecutor(max_workers=self.max_orders) as executor:
+            futures = []
+            for p in buy_prices[:self.max_orders]:
+                futures.append(executor.submit(self.open_long, qty, p))
+            
+            for f in futures:
+                res = f.result()
+                if not (isinstance(res, dict) and "error" in res):
+                    buy_count += 1
+                    self.active_buy_orders.append(res)
+                    self.orders_placed += 1
+
+        sell_count = 0
+        with ThreadPoolExecutor(max_workers=self.max_orders) as executor:
+            futures = []
+            for p in sell_prices[:self.max_orders]:
+                futures.append(executor.submit(self.open_short, qty, p))
+            
+            for f in futures:
+                res = f.result()
+                if not (isinstance(res, dict) and "error" in res):
+                    sell_count += 1
+                    self.active_sell_orders.append(res)
+                    self.orders_placed += 1
+                
+        logger.info(f"共下單: {buy_count} 個買單, {sell_count} 個賣單")
+
+    def open_long(self, quantity, price=None, **kwargs):
+        return self.open_position("Bid", quantity, price, **kwargs)
+
+    def open_short(self, quantity, price=None, **kwargs):
+        return self.open_position("Ask", quantity, price, **kwargs)
 
     def open_position(self, side, quantity, price=None, order_type="Limit", reduce_only=False, **kwargs):
         normalized_order_type = order_type.capitalize()
         qty = round_to_precision(abs(quantity), self.base_precision)
-        if qty < self.min_order_size: return {"error": "too_small"}
+        if qty < self.min_order_size: 
+            return {"error": "too_small"}
 
+        # 持仓上限检查（减仓单除外）
         if not reduce_only:
             net = self.get_net_position()
             if (side == "Bid" and net >= self.max_position) or (side == "Ask" and net <= -self.max_position):
-                logger.warning(f"【拦截】当前持仓 {net:.4f} 已达上限 {self.max_position}，禁止继续开仓")
-                return {"error": "max_position_reached"}
+                logger.warning(f"【下单拦截】持仓 {net:.4f} 已达上限 {self.max_position}，拒绝新开仓")
+                return {"error": "max_reached"}
 
         order_details = {
             "orderType": normalized_order_type,
             "quantity": str(qty),
             "side": side,
             "symbol": self.symbol,
-            "reduce_only": reduce_only, # StandX 使用下划线
+            "reduce_only": reduce_only,
+            "leverage": self.leverage,
         }
+
         if normalized_order_type == "Limit":
+            if price is None: return {"error": "no_price"}
             order_details["price"] = str(round_to_tick_size(price, self.tick_size))
-            # ⚠️ 修复：同时发送多种命名方式，确保 StandX 正确拦截 Taker
+            # 核心：物理锁死 Maker 模式
+            order_details["time_in_force"] = "POST_ONLY"
             order_details["post_only"] = True
             order_details["postOnly"] = True
-            order_details["time_in_force"] = "gtc"
-            order_details["timeInForce"] = "gtc"
 
         result = self.client.execute_order(order_details)
+        
+        # 针对 PostOnly Taker 的自动重试逻辑（远离价格中心）
+        if isinstance(result, dict) and "error" in result and "POST_ONLY_TAKER" in str(result["error"]):
+            logger.info(f"PostOnly 触发保护，调整 {side} 价格并重试...")
+            new_price = price - self.tick_size if side == "Bid" else price + self.tick_size
+            order_details["price"] = str(round_to_tick_size(new_price, self.tick_size))
+            result = self.client.execute_order(order_details)
+
         if isinstance(result, dict) and "error" in result:
-            logger.error(f"下單失敗: {result['error']}")
+            logger.error(f"下单失败: {result['error']} ({side} @ {price})")
         else:
-            logger.info(f"下單成功 (Maker): {side} {qty} @ {price or 'Market'}")
+            order_id = result.get("id") or result.get("request_id") or "unknown"
+            logger.info(f"✅ 下单成功 (Maker模式): {side} {qty} @ {price} | ID: {order_id}")
+        
         return result
 
     def close_position(self, quantity=None, price=None, order_type="Market"):
-        # 除非是风控强制减仓，否则 close_position 理论上由 calculate_prices 的偏移来完成
+        """主动平仓：同样改为 Limit 模式"""
         net = self.get_net_position()
         if abs(net) < self.min_order_size: return False
         
-        order_side = "Ask" if net > 0 else "Bid"
-        qty = abs(net) if quantity is None else min(abs(quantity), abs(net))
+        bid, ask = self.get_market_depth()
+        price = (ask + self.tick_size) if net > 0 else (bid - self.tick_size)
         
-        return self.open_position(side=order_side, quantity=qty, price=price, order_type=order_type, reduce_only=True)
+        return self.open_position("Ask" if net > 0 else "Bid", abs(net), price, "Limit", reduce_only=True)
 
     def run(self, duration_seconds=3600, interval_seconds=60):
         super().run(duration_seconds, interval_seconds)

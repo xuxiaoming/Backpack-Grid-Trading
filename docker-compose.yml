@@ -13,11 +13,13 @@ services:
       "--market-type", "perp",
       "--symbol", "BTC-USD",
       "--strategy", "standard",
-      "--spread", "0.10",
+      "--spread", "0.06",
       "--quantity", "0.02",
       "--max-orders", "1",
       "--inventory-skew", "0.8",
       "--max-position", "0.1",
+      "--target-position", "0",
       "--interval", "6",
-      "--enable-rebalance"
+      "--enable-rebalance",
+      "--leverage", "6"
     ]

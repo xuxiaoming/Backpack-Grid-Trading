@@ -61,6 +61,7 @@ def parse_arguments():
     parser.add_argument('--disable-rebalance', action='store_true', help='關閉重平功能')
     parser.add_argument('--base-asset-target', type=float, help='基礎資產目標比例 (0-100, 默認: 30)')
     parser.add_argument('--rebalance-threshold', type=float, help='重平觸發閾值 (>0, 默認: 15)')
+    parser.add_argument('--leverage', type=float, default=1.0, help='永續合約槓桿倍數 (默認: 1.0)')
 
     return parser.parse_args()
 
@@ -312,10 +313,20 @@ def main():
 
             elif market_type == 'perp':
                 logger.info(f"啟動永續合約做市模式 (策略: {strategy_name}, 交易所: {exchange})")
+                
+                # 提取重平设置
+                enable_rebalance = False
+                if args.enable_rebalance:
+                    enable_rebalance = True
+                elif args.disable_rebalance:
+                    enable_rebalance = False
+
                 logger.info(f"  目標持倉量: {abs(args.target_position)}")
                 logger.info(f"  最大持倉量: {args.max_position}")
                 logger.info(f"  倉位觸發值: {args.position_threshold}")
                 logger.info(f"  報價偏移係數: {args.inventory_skew}")
+                logger.info(f"  槓桿倍數: {args.leverage}x")
+                logger.info(f"  重平功能: {'開啟' if enable_rebalance else '關閉'}")
 
                 if strategy_name == 'maker_hedge':
                     market_maker = MakerTakerHedgeStrategy(
@@ -328,12 +339,14 @@ def main():
                         max_position=args.max_position,
                         position_threshold=args.position_threshold,
                         inventory_skew=args.inventory_skew,
+                        leverage=args.leverage,
                         stop_loss=args.stop_loss,
                         take_profit=args.take_profit,
-                            exchange=exchange,
+                        exchange=exchange,
                         exchange_config=exchange_config,
                         enable_database=args.enable_db,
-                        market_type='perp'
+                        market_type='perp',
+                        enable_rebalance=enable_rebalance
                     )
                 else:
                     market_maker = PerpetualMarketMaker(
@@ -347,11 +360,13 @@ def main():
                         max_position=args.max_position,
                         position_threshold=args.position_threshold,
                         inventory_skew=args.inventory_skew,
+                        leverage=args.leverage,
                         stop_loss=args.stop_loss,
                         take_profit=args.take_profit,
-                            exchange=exchange,
+                        exchange=exchange,
                         exchange_config=exchange_config,
-                        enable_database=args.enable_db
+                        enable_database=args.enable_db,
+                        enable_rebalance=enable_rebalance
                     )
 
                 if args.stop_loss is not None:
