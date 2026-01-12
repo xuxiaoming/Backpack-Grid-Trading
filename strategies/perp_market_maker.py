@@ -728,15 +728,17 @@ class PerpetualMarketMaker(MarketMaker):
             return buy_prices, sell_prices
 
         # 核心偏移邏輯：根據淨倉位(net)調整報價，目標是將淨倉位推向0 (Delta中性)
-        # 偏離量就是淨倉位本身
+        # 偏離量由持倉佔上限的比例決定
         deviation = net
         skew_ratio = max(-1.0, min(1.0, deviation / self.max_position))
 
         if not current_price:
             return buy_prices, sell_prices
 
-        # 如果是多頭 (net > 0)，skew_offset為正；如果是空頭 (net < 0)，skew_offset為負
-        skew_offset = current_price * self.inventory_skew * skew_ratio
+        # 修正：偏移量不應直接作用於全價，而應參考價差或設定一個微小的比例限制
+        # 我們設定最大偏移量為價格的 0.5% * inventory_skew
+        max_skew_percent = 0.005 
+        skew_offset = current_price * max_skew_percent * self.inventory_skew * skew_ratio
 
         # 調整價格以鼓勵反向交易，使淨倉位回歸0
         # 如果是多頭 (net > 0)，降低買賣價以鼓勵市場吃掉我們的賣單，同時降低我們買入的意願

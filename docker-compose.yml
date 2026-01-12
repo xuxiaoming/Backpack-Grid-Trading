@@ -16,8 +16,8 @@ services:
       "--grid-type", "neutral",
       "--auto-price",
       "--price-range", "1",
-      "--grid-num", "40",
-      "--quantity", "0.002",
+      "--grid-num", "30",
+      "--quantity", "0.0035",
       "--max-position", "2.0",
       "--duration", "3600000",
       "--interval", "14"
