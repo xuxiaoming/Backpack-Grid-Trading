@@ -13,7 +13,7 @@ services:
       "--market-type", "perp",
       "--symbol", "BTC-USD",
       "--strategy", "standard",
-      "--spread", "0.15",
+      "--spread", "0.10",
       "--quantity", "0.01",
       "--max-orders", "1",
       "--inventory-skew", "1.5",
