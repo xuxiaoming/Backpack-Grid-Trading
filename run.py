@@ -63,6 +63,8 @@ def parse_arguments():
     parser.add_argument('--rebalance-threshold', type=float, help='重平觸發閾值 (>0, 默認: 15)')
     parser.add_argument('--leverage', type=float, default=1.0, help='永續合約槓桿倍數 (默認: 1.0)')
 
+    parser.add_argument('--profit-threshold', type=float, default=0.0002, help='利润止盈加速阈值(百分比,如0.0002为0.02%)')
+    
     return parser.parse_args()
 
 def validate_rebalance_args(args):
@@ -366,7 +368,8 @@ def main():
                         exchange=exchange,
                         exchange_config=exchange_config,
                         enable_database=args.enable_db,
-                        enable_rebalance=enable_rebalance
+                        enable_rebalance=enable_rebalance,
+                        profit_threshold=args.profit_threshold
                     )
 
                 if args.stop_loss is not None:

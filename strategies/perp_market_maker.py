@@ -29,20 +29,24 @@ class PerpetualMarketMaker(MarketMaker):
         inventory_skew: float = 0.0,
         **kwargs,
     ) -> None:
+        # 1. 优先初始化所有私有变量，防止 AttributeError
+        self._cached_net_position: Optional[float] = None
+        self.unrealized_pnl: float = 0.0
+        
         # 版本标识
-        logger.info(">>> PerpetualMarketMaker 启动 [2026-01-13 旗舰版 v4.0] <<<")
+        logger.info(">>> PerpetualMarketMaker 启动 [2026-01-13 旗舰版 v4.3.1] <<<")
         
         self.position_threshold = kwargs.pop("position_threshold", 0.1)
         self.leverage = kwargs.pop("leverage", 1.0)
         self.stop_loss = kwargs.pop("stop_loss", None)
         self.take_profit = kwargs.pop("take_profit", None)
-        
-        # 缓存最新仓位，用于 WebSocket 同步
-        self._cached_net_position: Optional[float] = None
+        # 止盈触发阈值（百分比）
+        self.profit_threshold_pct = kwargs.pop("profit_threshold", 0.0002)
         
         if "enable_rebalance" not in kwargs:
             kwargs["enable_rebalance"] = False
         
+        # 2. 调用父类初始化
         super().__init__(
             api_key=api_key,
             secret_key=secret_key,
@@ -72,7 +76,7 @@ class PerpetualMarketMaker(MarketMaker):
             return 0.0
 
     def on_ws_message(self, stream: str, data: Any):
-        """重写 WS 消息回调，实时捕获仓位变化"""
+        """重载 WS 消息回调，实现秒级仓位同步"""
         # 调用父类处理订单更新等逻辑
         super().on_ws_message(stream, data)
         
@@ -84,6 +88,9 @@ class PerpetualMarketMaker(MarketMaker):
             for pos in positions:
                 if pos.get("symbol") == self.symbol:
                     new_net = float(pos.get("netQuantity", 0))
+                    # 更新未实现盈亏，用于智能止盈
+                    self.unrealized_pnl = float(pos.get("unrealizedPnl", 0.0))
+                    
                     if self._cached_net_position != new_net:
                         # logger.info(f"⚡ [WS] 仓位实时同步: {self._cached_net_position} -> {new_net}")
                         self._cached_net_position = new_net
@@ -118,20 +125,40 @@ class PerpetualMarketMaker(MarketMaker):
 
         dynamic_spread = self.base_spread_percentage * volatility_factor
         
-        # 3. 强化版偏移计算 (Aggressive Skew)
+        # 3. 强化版偏移计算 (Aggressive Skew + Profit Boost)
         net = self.get_net_position()
-        # skew_ratio: -1.0 到 1.0
         skew_ratio = max(-1.0, min(1.0, (net - self.target_position) / self.max_position))
         
-        # 增加一个非线性偏移：持仓越大，偏移越快，加速回笼资金
-        skew_power = 1.2 # 稍微增加非线性动力
-        adjusted_skew_ratio = (abs(skew_ratio) ** skew_power) * (1 if skew_ratio > 0 else -1)
+        # --- 新增：利润落袋加速逻辑 ---
+        profit_boost = 0.0
+        try:
+            net = self.get_net_position()
+            unrealized_pnl = getattr(self, 'unrealized_pnl', 0.0)
+            
+            if abs(net) > 0:
+                # 计算当前持仓的总价值
+                position_value = abs(net) * current_price
+                # 计算当前浮盈比例
+                current_profit_pct = unrealized_pnl / position_value if position_value > 0 else 0
+                
+                # 如果当前利润比例超过了设定的阈值 (如 0.02%)
+                if current_profit_pct > self.profit_threshold_pct:
+                    # 超过阈值越多，加速越猛，最高增加 1.0 (即偏移动力翻倍)
+                    profit_boost = min(1.0, (current_profit_pct / (self.profit_threshold_pct * 5)))
+                    # logger.info(f"💰 浮盈 {current_profit_pct:.3%} 触发加速止盈 (Boost: {profit_boost:.1%})")
+        except: pass
+
+        skew_power = 1.2
+        # 如果有利润，临时增加偏移比率，让价格更倾向于平仓
+        effective_skew_ratio = skew_ratio * (1.0 + profit_boost)
+        effective_skew_ratio = max(-1.0, min(1.0, effective_skew_ratio))
         
-        max_skew_percent = 0.004 # 限制最大偏移为 40 bps，防止挂单太偏离市场
+        adjusted_skew_ratio = (abs(effective_skew_ratio) ** skew_power) * (1 if effective_skew_ratio > 0 else -1)
+        
+        max_skew_percent = 0.004 
         skew_offset = current_price * max_skew_percent * self.inventory_skew * adjusted_skew_ratio
 
         # 4. 优化版阶梯挂单 (Pro Layering)
-        # 前 3 档极细间隔 (1 bps)，后几档宽间隔 (3 bps) 捕捉利润
         adjusted_buys = []
         adjusted_sells = []
         
@@ -140,26 +167,18 @@ class PerpetualMarketMaker(MarketMaker):
         base_sell = current_price + half_spread_val - skew_offset
 
         for i in range(self.max_orders):
-            # 动态间距逻辑
             if i < 3:
-                gap = 0.0001 * i # 前三档每档加 1 bps
+                gap = 0.0001 * i 
             else:
-                gap = (0.0001 * 2) + (0.0003 * (i - 2)) # 之后每档加 3 bps
+                gap = (0.0001 * 2) + (0.0003 * (i - 2)) 
                 
-            # 买单
             p_buy = base_buy - (current_price * gap)
             safe_buy = min(p_buy, bid_price) if bid_price else p_buy
             adjusted_buys.append(round_to_tick_size(safe_buy, self.tick_size))
             
-            # 卖单
             p_sell = base_sell + (current_price * gap)
             safe_sell = max(p_sell, ask_price) if ask_price else p_sell
             adjusted_sells.append(round_to_tick_size(safe_sell, self.tick_size))
-
-        # 详细日志 (仅在仓位重或波动大时打印)
-        if abs(net) >= self.max_position * 0.2 or volatility_factor > 1.2:
-            logger.info(f"⚡ [Pro决策] 波动:{volatility_factor:.2f}x | 偏移:{adjusted_skew_ratio:.1%} | 价差:{dynamic_spread/100:.3%}")
-            logger.info(f"📊 [积分区] 买一:{adjusted_buys[0]} ({abs(adjusted_buys[0]/current_price-1):.2%}) | 卖一:{adjusted_sells[0]} ({abs(adjusted_sells[0]/current_price-1):.2%})")
 
         return adjusted_buys, adjusted_sells
 
