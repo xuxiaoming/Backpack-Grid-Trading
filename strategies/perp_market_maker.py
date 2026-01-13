@@ -132,6 +132,7 @@ class PerpetualMarketMaker(MarketMaker):
         return False
 
     def calculate_prices(self):
+        # 1. 获取基准价差价格（基类会返回 max_orders 数量的价格点）
         buy_prices, sell_prices = super().calculate_prices()
         if not buy_prices or not sell_prices: return buy_prices, sell_prices
 
@@ -140,34 +141,38 @@ class PerpetualMarketMaker(MarketMaker):
         current_price = (bid_price + ask_price) / 2 if (bid_price and ask_price) else self.get_current_price()
         if not current_price: return buy_prices, sell_prices
 
-        # 1. 基础偏移计算
+        # 2. 基础偏移计算
         skew_ratio = max(-1.0, min(1.0, net / self.max_position))
         max_skew_percent = 0.005 
         skew_offset = current_price * max_skew_percent * self.inventory_skew * skew_ratio
 
-        # 2. 预调价格
-        raw_buys = [p - skew_offset for p in buy_prices]
-        raw_sells = [p - skew_offset for p in sell_prices]
+        # 3. 处理多档挂单 (Layering)
+        # 每档单子之间拉开一个微小的额外间距 (0.01% - 0.02%)，形成阶梯
+        layer_gap_percent = 0.0002  # 每档间隔 2 bps
+        
+        adjusted_buys = []
+        for i, p in enumerate(buy_prices):
+            # 原始价格 - 整体偏移 - 档位阶梯
+            raw_p = p - skew_offset - (current_price * layer_gap_percent * i)
+            # 物理边界保护
+            safe_p = min(raw_p, bid_price) if bid_price else raw_p
+            adjusted_buys.append(round_to_tick_size(safe_p, self.tick_size))
 
-        # 3. 核心：强制价格必须在盘口之外（Maker 物理保护）
-        # 即使 skew 算出要挂在对手盘里，也要强行压回到盘口 1 个 tick 处
-        if bid_price and ask_price:
-            safe_bid_boundary = bid_price
-            safe_ask_boundary = ask_price
-            
-            adjusted_buys = [round_to_tick_size(min(p, safe_bid_boundary), self.tick_size) for p in raw_buys]
-            adjusted_sells = [round_to_tick_size(max(p, safe_ask_boundary), self.tick_size) for p in raw_sells]
-        else:
-            adjusted_buys = [round_to_tick_size(p, self.tick_size) for p in raw_buys]
-            adjusted_sells = [round_to_tick_size(p, self.tick_size) for p in raw_sells]
+        adjusted_sells = []
+        for i, p in enumerate(sell_prices):
+            # 原始价格 - 整体偏移 + 档位阶梯
+            raw_p = p - skew_offset + (current_price * layer_gap_percent * i)
+            # 物理边界保护
+            safe_p = max(raw_p, ask_price) if ask_price else raw_p
+            adjusted_sells.append(round_to_tick_size(safe_p, self.tick_size))
 
         # 增加詳細日志
         if abs(net) >= 0.0001:
-            logger.info(f"=== 价格计算详情 ===")
+            logger.info(f"=== 多档价格计算 (Layers: {self.max_orders}) ===")
             logger.info(f"当前持仓: {net:.4f} | 偏移比例: {skew_ratio:.2%}")
-            logger.info(f"原始中间价: {current_price:.2f} | 偏移金额: {skew_offset:.4f}")
-            logger.info(f"盘口边界: 买 {bid_price} | 卖 {ask_price}")
-            logger.info(f"最终挂单: 买 {adjusted_buys[0]:.2f} | 卖 {adjusted_sells[0]:.2f}")
+            logger.info(f"首档买单: {adjusted_buys[0]:.2f} | 首档卖单: {adjusted_sells[0]:.2f}")
+
+        return adjusted_buys, adjusted_sells
 
         return adjusted_buys, adjusted_sells
 

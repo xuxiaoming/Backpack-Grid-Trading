@@ -13,11 +13,11 @@ services:
       "--market-type", "perp",
       "--symbol", "BTC-USD",
       "--strategy", "standard",
-      "--spread", "0.10",
-      "--quantity", "0.01",
-      "--max-orders", "1",
-      "--inventory-skew", "1.5",
-      "--max-position", "0.05",
+      "--spread", "0.12",        # 价差稍微拉宽，适合多档分布
+      "--quantity", "0.002",     # 每单 0.002 BTC (约 180 刀)
+      "--max-orders", "5",       # 单边挂 5 档，总计 0.01 BTC
+      "--inventory-skew", "1.2", # 稳健的偏移
+      "--max-position", "0.05",  # 最大持仓保持 0.05
       "--target-position", "0",
       "--interval", "6",
       "--enable-rebalance",
