@@ -2094,6 +2094,37 @@ class MarketMaker:
 
     def _log_boxed_summary(self, title: str, sections: List[Tuple[str, List[Union[str, Tuple[str, str]]]]]):
         """以框線格式輸出統計資訊。"""
+        # 徹底去掉統計框輸出，改為一行簡潔的日誌
+        buy_price = "N/A"
+        sell_price = "N/A"
+        spread_pct = "0.00%"
+        
+        for section_title, rows in sections:
+            if section_title == "市場狀態":
+                for label, value in rows:
+                    if label == "活躍訂單":
+                        if "價差" in value:
+                            # 提取價格信息
+                            parts = value.split('|')
+                            buy_price = parts[0].replace("買", "").strip()
+                            sell_price = parts[1].replace("賣", "").strip()
+                            spread_pct = parts[2].split('(')[1].replace(')', '').strip()
+                        else:
+                            # 如果沒有活躍訂單，嘗試從類屬性獲取盤口價
+                            buy_price = f"{getattr(self, 'last_bid_price', 0):.2f}"
+                            sell_price = f"{getattr(self, 'last_ask_price', 0):.2f}"
+                            if float(buy_price) > 0:
+                                spr = (float(sell_price) - float(buy_price)) / float(buy_price) * 100
+                                spread_pct = f"{spr:.3f}%"
+
+        # 獲取當前持倉
+        current_pos = getattr(self, "_cached_net_position", 0.0)
+        if hasattr(self, "get_net_position"):
+            current_pos = self.get_net_position()
+        
+        logger.info(f"📊 [狀態] 持倉: {current_pos:.6f} | 買一: {buy_price} | 賣一: {sell_price} | 價差: {spread_pct}")
+        return 
+
         inner_width = 74
         border_top = f"┌{'─' * inner_width}┐"
         border_section = f"├{'─' * inner_width}┤"

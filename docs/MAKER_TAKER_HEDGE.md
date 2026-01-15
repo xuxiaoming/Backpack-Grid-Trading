@@ -37,6 +37,9 @@ python run.py --exchange backpack --symbol SOL_USDC --spread 0.01 --strategy mak
 # Backpack 永續對沖
 python run.py --exchange backpack --market-type perp --symbol SOL_USDC_PERP --spread 0.01 --quantity 0.1 --strategy maker_hedge --target-position 0 --max-position 5 --position-threshold 2 --duration 3600 --interval 8
 
+# StandX Maker -> Backpack Spot Taker 對沖 (期現套利)
+python run.py --exchange standx --symbol BTC-USD --market-type perp --strategy maker_hedge --hedge-exchange backpack --hedge-symbol BTC_USDC --quantity 0.001 --spread 0.1 --duration 3600 --interval 10
+
 # Aster 永續對沖
 python run.py --exchange aster --market-type perp --symbol SOLUSDT --spread 0.01 --quantity 0.1 --strategy maker_hedge --target-position 0 --max-position 5 --position-threshold 2 --duration 3600 --interval 15
 

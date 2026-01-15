@@ -29,7 +29,19 @@ class _MakerTakerHedgeMixin:
         self._hedge_position_reference: float = 0.0
         self._hedge_flat_tolerance = 1e-8
         
-        # 本地倉位追蹤（基於成交推算，減少 API 請求）
+        # 跨交易所對沖支持
+        self.hedge_client = kwargs.pop("hedge_client", None)
+        self.hedge_symbol = kwargs.pop("hedge_symbol", None) or getattr(self, "symbol", None)
+        
+        # 套利統計
+        self.arb_stats = {
+            "total_trades": 0,
+            "total_volume": 0.0,
+            "est_profit_usd": 0.0,
+            "start_time": time.time()
+        }
+        
+        # 本地倉位追蹤
         self._local_position: Optional[float] = None
         self._local_position_synced: bool = False
         self._position_sync_interval: float = 60.0  # 每 60 秒強制同步一次
@@ -57,69 +69,171 @@ class _MakerTakerHedgeMixin:
     # ------------------------------------------------------------------
     # 下單與倉位管理
     # ------------------------------------------------------------------
-    def place_limit_orders(self) -> None:
-        """僅在買一/賣一位置掛出Post-Only訂單。"""
+    def get_hedge_market_depth(self) -> Tuple[Optional[float], Optional[float]]:
+        """獲取對沖交易所的買一/賣一價格（增加 OrderBook 備選方案）。"""
+        if not self.hedge_client:
+            return None, None
+        try:
+            # 1. 首先嘗試獲取 Ticker
+            ticker = self.hedge_client.get_ticker(self.hedge_symbol)
+            if isinstance(ticker, dict) and "error" not in ticker:
+                bid = ticker.get("bidPrice") or ticker.get("bid_price")
+                ask = ticker.get("askPrice") or ticker.get("ask_price")
+                if bid and ask:
+                    return float(bid), float(ask)
 
+            # 2. 如果 Ticker 沒拿到買賣價，嘗試獲取 OrderBook
+            logger.debug(f"Ticker 未能獲取買賣價，嘗試從 OrderBook 獲取 ({self.hedge_symbol})")
+            depth = self.hedge_client.get_order_book(self.hedge_symbol, limit=5)
+            if isinstance(depth, dict) and "error" not in depth:
+                bids = depth.get("bids", [])
+                asks = depth.get("asks", [])
+                if bids and asks:
+                    # bids/asks 格式通常是 [[price, qty], ...]
+                    bid = bids[0][0] if isinstance(bids[0], (list, tuple)) else bids[0].get("price")
+                    ask = asks[0][0] if isinstance(asks[0], (list, tuple)) else asks[0].get("price")
+                    return float(bid), float(ask)
+            
+            logger.warning(f"無法從 Ticker 或 OrderBook 獲取對沖交易所 ({self.hedge_symbol}) 的有效行情")
+            return None, None
+        except Exception as e:
+            logger.error(f"獲取對沖交易所行情異常: {e}")
+            return None, None
+
+    def calculate_basis_info(self) -> Dict[str, Any]:
+        """計算兩端交易所之間的價差信息。"""
+        # 獲取 Maker 端價格 (StandX)
+        m_bid, m_ask = self.get_market_depth()
+        # 獲取對沖端價格 (Backpack)
+        h_bid, h_ask = self.get_hedge_market_depth()
+
+        # 獲取即時持倉信息
+        m_pos = self._fetch_current_position_reference() or 0.0
+        h_pos = self._fetch_hedge_exchange_position() or 0.0
+        total_delta = (m_pos - self._hedge_position_reference) + (h_pos - self._hedge_exchange_position_reference)
+
+        logger.info("================ 账户持仓快照 ================")
+        logger.info("StandX 持仓: %.6f | Backpack 持仓: %.6f", m_pos, h_pos)
+        logger.info("累计对冲偏差 (Net Delta): %.6f", total_delta)
+        logger.info("--------------------------------------------")
+
+        if not all([m_bid, m_ask, h_bid, h_ask]):
+            return {}
+
+        m_mid = (m_bid + m_ask) / 2
+        h_mid = (h_bid + h_ask) / 2
+
+        # 基差 (Basis) = (StandX - Backpack) / Backpack
+        basis = (m_mid - h_mid) / h_mid * 100
+        
+        # 獲取 StandX 資金費率
+        funding_rate = 0.0
+        try:
+            if hasattr(self.client, "query_funding_rates"):
+                funding_data = self.client.query_funding_rates(self.symbol)
+                if isinstance(funding_data, list) and len(funding_data) > 0:
+                    funding_rate = float(funding_data[0].get("funding_rate", 0)) * 100
+        except Exception as e:
+            logger.debug(f"獲取資金費率失敗: {e}")
+
+        # 使用用戶設置的 spread 作為盈利閾值，如果沒設置則默認 0.11%
+        target_profit = getattr(self, "base_spread_percentage", 0.11)
+        if target_profit is None or target_profit <= 0:
+            target_profit = 0.11
+        
+        return {
+            "maker_mid": m_mid,
+            "hedge_mid": h_mid,
+            "basis_pct": basis,
+            "funding_rate_pct": funding_rate,
+            "is_profitable": abs(basis + funding_rate) > target_profit,
+            "cost_threshold": target_profit
+        }
+
+    def place_limit_orders(self) -> None:
+        """根據價差監控決定是否掛單。"""
         self.check_ws_connection()
         self.cancel_existing_orders()
 
-        bid_price, ask_price = self.get_market_depth()
-        if bid_price is None or ask_price is None:
-            logger.warning("無法取得買一/賣一價格，跳過本輪掛單")
+        # 獲取價差信息
+        basis_info = self.calculate_basis_info()
+        if not basis_info:
+            logger.warning("無法獲取完整價差信息，跳過本輪")
             return
 
-        buy_price = round_to_tick_size(bid_price, self.tick_size)
-        sell_price = round_to_tick_size(ask_price, self.tick_size)
+        # 獲取價格信息，用於日誌顯示
+        m_bid, m_ask = self.get_market_depth()
+        if m_bid and m_ask:
+            self.last_bid_price = m_bid
+            self.last_ask_price = m_ask
 
-        if sell_price <= buy_price:
-            sell_price = round_to_tick_size(buy_price + self.tick_size, self.tick_size)
-            if sell_price <= buy_price:
-                logger.warning("價差過窄無法安全掛單，跳過本輪")
-                return
+        basis = basis_info["basis_pct"]
+        funding = basis_info.get("funding_rate_pct", 0)
+        total_edge = basis + funding # 賣出套利的總邊際 (StandX高於Backpack)
+        buy_edge = -basis - funding # 買入套利的總邊際 (StandX低於Backpack)
+        
+        cost = basis_info["cost_threshold"]
+        
+        logger.info(">>> 价差监控 | 卖出套利边际: %.4f%% | 买入套利边际: %.4f%% | 成本线: %.2f%%", 
+                    total_edge, buy_edge, cost)
 
-        buy_qty, sell_qty = self._determine_order_sizes(buy_price, ask_price)
-        if buy_qty is None or sell_qty is None:
-            logger.warning("無法計算掛單數量，跳過本輪")
+        # 定期輸出統計摘要
+        now = time.time()
+        if hasattr(self, "last_summary_time") and now - self.last_summary_time > 300: # 每5分鐘一次
+            elapsed = (now - self.arb_stats["start_time"]) / 3600
+            logger.info("================ 套利盈亏汇总 ================")
+            logger.info("运行时间: %.2f 小时", elapsed)
+            logger.info("成交笔数: %d 次", self.arb_stats["total_trades"])
+            logger.info("累计交易额: %.2f USD", self.arb_stats["total_volume"])
+            logger.info("预估累计收益: %.4f USD", self.arb_stats["est_profit_usd"])
+            logger.info("============================================")
+            self.last_summary_time = now
+        elif not hasattr(self, "last_summary_time"):
+            self.last_summary_time = now
+
+        # 獲取 Maker 端盤口 (StandX)
+        m_bid, m_ask = self.get_market_depth()
+        if m_bid is None or m_ask is None:
             return
+
+        # 核心套利過濾邏輯
+        # 只要有一邊邊際覆蓋了成本（或接近成本），就允許掛單
+        can_buy = buy_edge > (cost - 0.02) # 留 2bps 緩衝
+        can_sell = total_edge > (cost - 0.02)
+
+        buy_price = round_to_tick_size(m_bid, self.tick_size)
+        sell_price = round_to_tick_size(m_ask, self.tick_size)
 
         self.active_buy_orders = []
         self.active_sell_orders = []
 
-        if buy_qty >= self.min_order_size:
-            buy_order = self._build_limit_order(
-                side="Bid",
-                price=buy_price,
-                quantity=buy_qty,
-            )
-            result = self._submit_order(buy_order, slot="limit")
-            if isinstance(result, dict) and "error" in result:
-                logger.error(f"買單掛單失敗: {result['error']}")
-            else:
-                logger.info(
-                    "買單已掛出: 價格 %s, 數量 %s",
-                    format_balance(buy_price),
-                    format_balance(buy_qty),
-                )
-                self.active_buy_orders.append(result)
-                self.orders_placed += 1
+        # 決定掛單數量
+        calc_buy_qty, calc_sell_qty = self._determine_order_sizes(buy_price, sell_price)
 
-        if sell_qty >= self.min_order_size:
-            sell_order = self._build_limit_order(
-                side="Ask",
-                price=sell_price,
-                quantity=sell_qty,
-            )
+        # 只有當買入有利潤時才掛買單
+        if can_buy and calc_buy_qty and calc_buy_qty >= self.min_order_size:
+            buy_order = self._build_limit_order(side="Bid", price=buy_price, quantity=calc_buy_qty)
+            result = self._submit_order(buy_order, slot="limit")
+            if not (isinstance(result, dict) and "error" in result):
+                logger.info("✅ 發現買入套利空間，掛出買單: %s, 數量: %s", 
+                            format_balance(buy_price), format_balance(calc_buy_qty))
+                self.active_buy_orders.append(result)
+        elif not can_buy:
+            logger.debug("買入套利空間不足 (%.4f%% < %.2f%%)，不掛買單", buy_edge, cost)
+
+        # 只有當賣出有利潤時才掛賣單
+        if can_sell and calc_sell_qty and calc_sell_qty >= self.min_order_size:
+            sell_order = self._build_limit_order(side="Ask", price=sell_price, quantity=calc_sell_qty)
             result = self._submit_order(sell_order, slot="limit")
-            if isinstance(result, dict) and "error" in result:
-                logger.error(f"賣單掛單失敗: {result['error']}")
-            else:
-                logger.info(
-                    "賣單已掛出: 價格 %s, 數量 %s",
-                    format_balance(sell_price),
-                    format_balance(sell_qty),
-                )
+            if not (isinstance(result, dict) and "error" in result):
+                logger.info("✅ 發現賣出套利空間，掛出賣單: %s, 數量: %s", 
+                            format_balance(sell_price), format_balance(calc_sell_qty))
                 self.active_sell_orders.append(result)
-                self.orders_placed += 1
+        elif not can_sell:
+            logger.debug("賣出套利空間不足 (%.4f%% < %.2f%%)，不掛賣單", total_edge, cost)
+
+        if not can_buy and not can_sell:
+            logger.info("⏸ 當前基差無套利空間，暫停掛單等待機會...")
 
     def _determine_order_sizes(self, buy_price: float, ask_price: float) -> Tuple[Optional[float], Optional[float]]:
         """根據餘額決定單筆買/賣單量。"""
@@ -203,6 +317,18 @@ class _MakerTakerHedgeMixin:
             
         logger.info(f"處理Maker成交：{side} {quantity}@{price}")
         
+        # 更新統計數據
+        self.arb_stats["total_trades"] += 1
+        trade_value = quantity * price
+        self.arb_stats["total_volume"] += trade_value
+        
+        # 估算這筆成交的利潤 (簡化版：基差 * 成交額 / 100)
+        basis_info = self.calculate_basis_info()
+        if basis_info and "basis_pct" in basis_info:
+            basis = abs(basis_info["basis_pct"] + basis_info.get("funding_rate_pct", 0))
+            profit = trade_value * (basis - basis_info["cost_threshold"]) / 100
+            self.arb_stats["est_profit_usd"] += max(0, profit)
+
         # 先根據 Maker 成交更新本地倉位追蹤
         # Maker Bid（買入）成交 = 倉位增加，Maker Ask（賣出）成交 = 倉位減少
         self._update_local_position_from_fill(side, quantity)
@@ -282,6 +408,35 @@ class _MakerTakerHedgeMixin:
         remaining_quantity = round_to_precision(quantity, self.base_precision)
         last_delta: Optional[float] = None
 
+        # 如果是跨交易所對沖，我們直接下單
+        if self.hedge_client:
+            order = {
+                "orderType": "Market",
+                "quantity": str(remaining_quantity),
+                "side": attempt_side,
+                "symbol": self.hedge_symbol,
+            }
+            target_client = self.hedge_client
+            target_exchange = target_client.get_exchange_name().lower()
+
+            if target_exchange == "backpack":
+                order["timeInForce"] = "IOC"
+                # Spot 對沖不需要其它參數
+            
+            logger.info(f"🚀 [對沖執行] 正在 {target_exchange.upper()} 以市價 {attempt_side} {remaining_quantity} 對沖")
+            result = target_client.execute_order(order)
+            
+            if isinstance(result, dict) and ("id" in result or "orderId" in result or "uuid" in result):
+                logger.info(f"✅ 跨交易所對沖訂單已提交: {result.get('id') or result.get('orderId')}")
+                # 簡單等待同步
+                time.sleep(1.0)
+                self._fetch_hedge_exchange_position() # 觸发一次同步
+                return 0.0
+            else:
+                logger.error(f"❌ 跨交易所對沖失敗: {result}")
+                return remaining_quantity
+
+        # --- 以下是同交易所對沖（原有邏輯） ---
         current_delta = self._calculate_position_delta(current_position=current_position)
         if current_delta is not None:
             if abs(current_delta) <= self._hedge_flat_tolerance:
@@ -308,28 +463,41 @@ class _MakerTakerHedgeMixin:
                 "orderType": "Market",
                 "quantity": str(remaining_quantity),
                 "side": attempt_side,
-                "symbol": self.symbol,
+                "symbol": self.hedge_symbol if self.hedge_client else self.symbol,
             }
 
-            if getattr(self, "exchange", "backpack") == "backpack":
+            # 根據目標交易所設置特定參數
+            target_client = self.hedge_client if self.hedge_client else self.client
+            target_exchange = target_client.get_exchange_name().lower()
+
+            if target_exchange == "backpack":
                 order["timeInForce"] = "IOC"
                 order["autoLendRedeem"] = True
                 order["autoLend"] = True
 
-            if isinstance(self, PerpetualMarketMaker):
+            # 只有當對沖目標是永續合約時才使用 reduceOnly
+            # 注意：如果跨交易所對沖（如 StandX Perp -> Backpack Spot），對沖側是 Spot，不能用 reduceOnly
+            if self.hedge_client:
+                # 這裡簡單判斷對沖交易對是否包含 PERP 或 USD-PERP 等
+                is_hedge_perp = any(x in self.hedge_symbol.upper() for x in ["PERP", "-USD"])
+                if is_hedge_perp:
+                    order["reduceOnly"] = True
+            elif isinstance(self, PerpetualMarketMaker):
                 order["reduceOnly"] = True
 
             logger.info(
-                "提交市價對沖訂單: %s %s (第 %d 次嘗試)",
+                "提交市價對沖訂單 [%s]: %s %s (第 %d 次嘗試)",
+                target_exchange.upper(),
                 attempt_side,
                 format_balance(remaining_quantity),
                 attempt,
             )
-            result = self._submit_order(order, slot="market")
+            result = self._request_with_backoff(slot, target_client.execute_order, order)
             if isinstance(result, dict) and "error" in result:
                 logger.error(f"市價對沖失敗: {result['error']}")
                 # 對沖失敗，強制同步 API 校正本地追蹤
-                self._sync_position_from_api()
+                if not self.hedge_client:
+                    self._sync_position_from_api()
                 return None
 
             logger.info("市價對沖訂單已提交: %s", result.get("id", "未知ID"))
@@ -390,11 +558,77 @@ class _MakerTakerHedgeMixin:
         if reference is None:
             reference = 0.0
         self._hedge_position_reference = reference
+        
+        # 如果是跨交易所對沖，還需要記錄對沖交易所的初始倉位
+        if self.hedge_client:
+            hedge_ref = self._fetch_hedge_exchange_position()
+            if hedge_ref is None:
+                hedge_ref = 0.0
+            self._hedge_exchange_position_reference = hedge_ref
+            logger.info("跨交易所對沖初始化: Maker端參考=%.8f, Hedge端參考=%.8f", reference, hedge_ref)
+        
         # 同時初始化本地追蹤
         self._local_position = reference
         self._local_position_synced = True
         self._last_position_sync_ts = time.monotonic()
-        logger.info("對沖參考倉位初始化為 %.8f（本地追蹤已同步）", reference)
+        if not self.hedge_client:
+            logger.info("對沖參考倉位初始化為 %.8f（本地追蹤已同步）", reference)
+
+    def _fetch_hedge_exchange_position(self) -> Optional[float]:
+        """獲取對沖交易所的當前倉位。"""
+        if not self.hedge_client:
+            return None
+        try:
+            # 這裡需要根據對沖交易所是 Spot 還是 Perp 來獲取倉位
+            is_perp = any(x in self.hedge_symbol.upper() for x in ["PERP", "-USD"])
+            if is_perp:
+                positions = self.hedge_client.get_positions(self.hedge_symbol)
+                if isinstance(positions, list) and positions:
+                    pos = positions[0]
+                    for field in ["netQuantity", "size", "position_size", "amount"]:
+                        if field in pos:
+                            return float(pos[field] or 0)
+                return 0.0
+            else:
+                # Spot - 獲取基礎資產餘額 (同時檢查普通餘額和抵押品)
+                base_asset = self.hedge_symbol.split('_')[0] if '_' in self.hedge_symbol else self.hedge_symbol.split('-')[0]
+                total_h_pos = 0.0
+                
+                # 1. 檢查普通餘額 (Capital)
+                try:
+                    balances = self.hedge_client.get_balances()
+                    if isinstance(balances, dict):
+                        # 情況 A: 直接 Key 匹配
+                        if base_asset in balances:
+                            info = balances[base_asset]
+                            total_h_pos += float(info.get("available") or info.get("total") or 0) if isinstance(info, dict) else float(info or 0)
+                        # 情況 B: 遍歷匹配
+                        else:
+                            for k, v in balances.items():
+                                if k.upper() == base_asset.upper():
+                                    total_h_pos += float(v.get("available") or v.get("total") or 0) if isinstance(v, dict) else float(v or 0)
+                                    break
+                except Exception as e:
+                    logger.debug(f"獲取普通餘額異常: {e}")
+
+                # 2. 檢查抵押品餘額 (Backpack 交易賬户)
+                try:
+                    collateral_data = self.hedge_client.get_collateral()
+                    if isinstance(collateral_data, dict) and "collateral" in collateral_data:
+                        for item in collateral_data["collateral"]:
+                            if item.get("symbol") == base_asset:
+                                total_h_pos += float(item.get("totalQuantity") or item.get("availableQuantity") or 0)
+                                break
+                except Exception as e:
+                    logger.debug(f"獲取抵押品餘額異常: {e}")
+
+                if total_h_pos == 0:
+                    logger.debug(f"Hedge 端資產 {base_asset} 讀取為 0 (已檢查 Capital 和 Collateral)")
+                
+                return total_h_pos
+        except Exception as e:
+            logger.error(f"獲取對沖交易所倉位異常: {e}")
+            return None
 
     def _get_tracked_position(self) -> Optional[float]:
         """獲取本地追蹤的倉位，必要時自動同步。"""
@@ -439,19 +673,38 @@ class _MakerTakerHedgeMixin:
         *,
         current_position: Optional[float] = None,
     ) -> Optional[float]:
-        """計算當前倉位相對參考水位的差值（優先使用本地追蹤）。"""
+        """計算當前倉位相對參考水位的差值（跨交易所時計算總 Delta）。"""
 
+        # 1. 計算 Maker 交易所的 Delta
         if current_position is not None:
-            current = current_position
+            maker_current = current_position
         else:
-            # 優先使用本地追蹤
-            current = self._get_tracked_position()
-            if current is None:
-                # 回退到 API
-                current = self._sync_position_from_api()
-        if current is None:
+            maker_current = self._get_tracked_position()
+            if maker_current is None:
+                maker_current = self._sync_position_from_api()
+        
+        if maker_current is None:
             return None
-        return current - self._hedge_position_reference
+            
+        maker_delta = maker_current - self._hedge_position_reference
+        
+        # 2. 如果沒有跨交易所，直接返回 Maker Delta
+        if not self.hedge_client:
+            return maker_delta
+            
+        # 3. 如果是跨交易所，加上 Hedge 交易所的 Delta
+        hedge_current = self._fetch_hedge_exchange_position()
+        if hedge_current is None:
+            return None # 無法確認對沖端倉位，安全起見返回 None
+            
+        hedge_delta = hedge_current - self._hedge_exchange_position_reference
+        
+        # 總 Delta = Maker Delta + Hedge Delta
+        # 注意：如果是期現套利，一個是 Perp (-1), 一个是 Spot (+1)，和應該為 0
+        total_delta = maker_delta + hedge_delta
+        logger.debug("跨交易所 Delta 計算: Maker(%.8f) + Hedge(%.8f) = Total(%.8f)", 
+                     maker_delta, hedge_delta, total_delta)
+        return total_delta
 
     def _fetch_current_position_reference(self, force_refresh: bool = False) -> Optional[float]:
         """透過 API 獲取當前倉位指標。
@@ -592,10 +845,11 @@ class _MakerTakerHedgeMixin:
             "timeInForce": "GTC",
         }
 
-        if getattr(self, "exchange", "backpack") == "backpack":
+        if getattr(self, "exchange", "") in ["backpack", "standx"]:
             order["postOnly"] = True
-            order["autoLendRedeem"] = True
-            order["autoLend"] = True
+            if self.exchange == "backpack":
+                order["autoLendRedeem"] = True
+                order["autoLend"] = True
 
         return order
 

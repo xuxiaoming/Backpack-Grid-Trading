@@ -780,6 +780,27 @@ class StandXClient(BaseExchangeClient):
             normalized.append(self._normalize_order_fields(dict(item)))
         return normalized
 
+    def query_funding_rates(self, symbol: str, start_time: Optional[int] = None, end_time: Optional[int] = None) -> Any:
+        """查詢資金費率歷史"""
+        resolved_symbol = self._resolve_symbol(symbol)
+        if not resolved_symbol:
+            return self._unknown_symbol_error(symbol)
+            
+        params: Dict[str, Any] = {"symbol": resolved_symbol}
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time or int(time.time() * 1000)
+
+        result = self.make_request(
+            "GET",
+            "/api/query_funding_rates",
+            instruction=True,
+            params=params,
+            retry_count=self.max_retries,
+        )
+        return result
+
     def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:
         """取消所有訂單"""
         # 先獲取所有開放訂單

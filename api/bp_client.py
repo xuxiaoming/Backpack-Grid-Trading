@@ -25,6 +25,9 @@ class BPClient(BaseExchangeClient):
         super().__init__(config)
         self.api_key = config.get("api_key")
         self.secret_key = config.get("secret_key")
+        self.base_url = config.get("base_url") or API_URL
+        if self.base_url.endswith('/'):
+            self.base_url = self.base_url[:-1]
 
         # 從環境變量讀取代理配置
         self.proxies = get_proxy_config()
@@ -58,7 +61,7 @@ class BPClient(BaseExchangeClient):
         Returns:
             API響應數據
         """
-        url = f"{API_URL}{endpoint}"
+        url = f"{self.base_url}{endpoint}"
         headers = {
             'Content-Type': 'application/json',
             'X-Broker-Id': '1500'
@@ -156,6 +159,10 @@ class BPClient(BaseExchangeClient):
         endpoint = f"/api/{API_VERSION}/capital"
         instruction = "balanceQuery"
         return self.make_request("GET", endpoint, self.api_key, self.secret_key, instruction)
+
+    def get_balances(self):
+        """獲取賬户餘額 (別名，兼容性支持)"""
+        return self.get_balance()
 
     def get_collateral(self, subaccount_id=None):
         """獲取抵押品資產"""
