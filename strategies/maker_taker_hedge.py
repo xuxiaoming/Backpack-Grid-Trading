@@ -215,7 +215,7 @@ class _MakerTakerHedgeMixin:
             buy_order = self._build_limit_order(side="Bid", price=buy_price, quantity=calc_buy_qty)
             result = self._submit_order(buy_order, slot="limit")
             if not (isinstance(result, dict) and "error" in result):
-                logger.info("✅ 發現買入套利空間，掛出買單: %s, 數量: %s", 
+                logger.info("✅ 發現買入套利空間，掛出買單: %s, 數量: %s (postOnly保護已開啟)", 
                             format_balance(buy_price), format_balance(calc_buy_qty))
                 self.active_buy_orders.append(result)
         elif not can_buy:
@@ -226,7 +226,7 @@ class _MakerTakerHedgeMixin:
             sell_order = self._build_limit_order(side="Ask", price=sell_price, quantity=calc_sell_qty)
             result = self._submit_order(sell_order, slot="limit")
             if not (isinstance(result, dict) and "error" in result):
-                logger.info("✅ 發現賣出套利空間，掛出賣單: %s, 數量: %s", 
+                logger.info("✅ 發現賣出套利空間，掛出賣單: %s, 數量: %s (postOnly保護已開啟)", 
                             format_balance(sell_price), format_balance(calc_sell_qty))
                 self.active_sell_orders.append(result)
         elif not can_sell:
