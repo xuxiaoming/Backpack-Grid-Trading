@@ -1970,7 +1970,7 @@ class MarketMaker:
         self.active_sell_orders = active_sell_orders
         if prev_buy_orders != len(active_buy_orders) or prev_sell_orders != len(active_sell_orders):
             logger.info(f"訂單數量變更: 買單 {prev_buy_orders} -> {len(active_buy_orders)}, 賣單 {prev_sell_orders} -> {len(active_sell_orders)}")
-        logger.info(f"當前活躍訂單: 買單 {len(self.active_buy_orders)} 個, 賣單 {len(self.active_sell_orders)} 個")
+        logger.debug(f"當前活躍訂單: 買單 {len(self.active_buy_orders)} 個, 賣單 {len(self.active_sell_orders)} 個")
         return filled_trades
     def estimate_profit(self, pnl_data=None):
         """輸出本次迭代的關鍵統計資訊。"""
@@ -2334,24 +2334,28 @@ class MarketMaker:
     
     def _ensure_data_streams(self):
         """確保所有必要的數據流訂閲都是活躍的"""
-        # 如果使用 Websea，不需要 WebSocket 數據流
         if self.ws is None:
             return
             
+        # 兼容不同交易所的频道名称
+        depth_channel = "depth_book" if self.exchange == 'standx' else "depth"
+        ticker_channel = "price" if self.exchange == 'standx' else "bookTicker"
+        
         # 檢查深度流訂閲
-        if "depth" not in self.ws.subscriptions:
-            logger.info("重新訂閲深度數據流...")
-            self.ws.initialize_orderbook()  # 重新初始化訂單簿
+        if depth_channel not in self.ws.subscriptions:
+            logger.debug(f"重新訂閲深度數據流 ({depth_channel})...")
+            self.ws.initialize_orderbook()
             self.ws.subscribe_depth()
         
         # 檢查行情數據訂閲
-        if "bookTicker" not in self.ws.subscriptions:
-            logger.info("重新訂閲行情數據...")
+        if ticker_channel not in self.ws.subscriptions:
+            logger.debug(f"重新訂閲行情數據 ({ticker_channel})...")
             self.ws.subscribe_bookTicker()
         
-        # 檢查私有訂單更新流
-        if f"account.orderUpdate.{self.symbol}" not in self.ws.subscriptions:
-            logger.info("重新訂閲私有訂單更新流...")
+        # 檢查私有訂單更新流 (兼容 StandX 名称)
+        order_stream = f"account.orderUpdate.{self.symbol}"
+        if order_stream not in self.ws.subscriptions and "order" not in self.ws.subscriptions:
+            logger.debug(f"重新訂閲私有訂單更新流 ({order_stream})...")
             self.subscribe_order_updates()
 
     def check_stop_conditions(self, realized_pnl, unrealized_pnl, session_realized_pnl) -> bool:
@@ -2420,8 +2424,8 @@ class MarketMaker:
             while time.time() - start_time < duration_seconds and not self._stop_flag:
                 iteration += 1
                 current_time = time.time()
-                logger.info(f"\n=== 第 {iteration} 次迭代 ===")
-                logger.info(f"時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                # logger.info(f"\n=== 第 {iteration} 次迭代 ===")
+                # logger.info(f"時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
                 # 檢查連接並在必要時重連
                 connection_status = self.check_ws_connection()
@@ -2445,9 +2449,9 @@ class MarketMaker:
                 # 下限價單
                 self.place_limit_orders()
 
-                # 計算PnL並輸出簡化統計
+                # 計算PnL
                 pnl_data = self.calculate_pnl()
-                self.estimate_profit(pnl_data)
+                # self.estimate_profit(pnl_data)  # 關閉 boxed summary 日誌
 
                 # 定期打印交易統計報表
                 if current_time - last_report_time >= report_interval:
@@ -2470,7 +2474,7 @@ class MarketMaker:
                     break
 
                 wait_time = interval_seconds
-                logger.info(f"等待 {wait_time} 秒後進行下一次迭代...")
+                # logger.info(f"等待 {wait_time} 秒後進行下一次迭代...")
                 time.sleep(wait_time)
 
             # 結束運行時打印最終報表

@@ -23,8 +23,6 @@ def parse_arguments():
     
     # 基本參數
     parser.add_argument('--exchange', type=str, choices=['backpack', 'aster', 'paradex', 'lighter', 'apex', 'standx'], default='backpack', help='交易所選擇 (backpack、aster、paradex、lighter、apex 或 standx)')
-    parser.add_argument('--hedge-exchange', type=str, choices=['backpack', 'aster', 'paradex', 'lighter', 'apex', 'standx'], help='對沖交易所選擇 (用於跨交易所對沖模式)')
-    parser.add_argument('--hedge-symbol', type=str, help='對沖交易對 (例如: SOL_USDC)')
     parser.add_argument('--api-key', type=str, help='API Key (可選，默認使用環境變數或配置文件)')
     parser.add_argument('--secret-key', type=str, help='Secret Key (可選，默認使用環境變數或配置文件)')
     
@@ -66,9 +64,8 @@ def parse_arguments():
     parser.add_argument('--leverage', type=float, default=1.0, help='永續合約槓桿倍數 (默認: 1.0)')
 
     parser.add_argument('--profit-threshold', type=float, default=0.0002, help='利润止盈加速阈值(百分比,如0.0002为0.02%)')
-    parser.add_argument('--trend-threshold', type=float, default=0.0015, help='趋势识别阈值(百分比,如0.0015为0.15%)')
-    parser.add_argument('--max-skew-limit', type=float, default=0.006, help='最大偏移比例上限(如0.006为60bps)')
-    parser.add_argument('--volatility-scale', type=float, default=0.00008, help='波动率基准分母')
+    parser.add_argument('--volatility-ceiling', type=float, help='波动率熔断阈值 (百分比，如 0.05 代表 0.05%)')
+    parser.add_argument('--trend-threshold', type=float, default=0.0008, help='趋势识别阈值 (百分比，默认 0.0008 即 8 bps)')
     
     return parser.parse_args()
 
@@ -214,52 +211,8 @@ def main():
         if not api_key or not secret_key:
             logger.error("缺少API密鑰，請通過命令行參數或環境變量提供")
             sys.exit(1)
-
-    # 跨交易所對沖客戶端初始化
-    hedge_client = None
-    if args.hedge_exchange:
-        logger.info(f"初始化對沖交易所: {args.hedge_exchange}")
-        hedge_exchange = args.hedge_exchange
-        
-        if hedge_exchange == 'backpack':
-            from api.bp_client import BPClient
-            h_api_key = os.getenv('BACKPACK_KEY', '')
-            h_secret_key = os.getenv('BACKPACK_SECRET', '')
-            h_base_url = os.getenv('BASE_URL', 'https://api.backpack.work')
-            hedge_client = BPClient({
-                'api_key': h_api_key,
-                'secret_key': h_secret_key,
-                'base_url': h_base_url,
-            })
-        elif hedge_exchange == 'standx':
-            from api.standx_client import StandXClient
-            h_jwt_token = os.getenv('STANDX_JWT_TOKEN', '')
-            h_base_url = os.getenv('STANDX_BASE_URL', 'https://perps.standx.com')
-            h_ed25519_private_key = os.getenv('STANDX_ED25519_PRIVATE_KEY_BYTES', '')
-            h_ed25519_request_id = os.getenv('STANDX_ED25519_REQUEST_ID', '')
-            hedge_client = StandXClient({
-                'jwt_token': h_jwt_token,
-                'base_url': h_base_url,
-                'ed25519_private_key_bytes': h_ed25519_private_key,
-                'ed25519_request_id': h_ed25519_request_id,
-            })
-        # 可以根據需要添加其他對沖交易所的初始化
-        
-        if not hedge_client:
-            logger.error(f"目前不支持將 {hedge_exchange} 作為對沖交易所")
-            sys.exit(1)
     
     # 決定執行模式
-    if args.web:
-        # ... (web logic remains)
-        pass
-    
-    # 自動修正：StandX 只有合約模式
-    if exchange == 'standx' and args.market_type == 'spot':
-        args.market_type = 'perp'
-        market_type = 'perp'
-        logger.info("檢測到 StandX 交易所，自動切換至永續合約 (perp) 模式")
-
     if args.web:
         # 啟動Web界面
         try:
@@ -397,13 +350,7 @@ def main():
                         exchange_config=exchange_config,
                         enable_database=args.enable_db,
                         market_type='perp',
-                        enable_rebalance=enable_rebalance,
-                        hedge_client=hedge_client,
-                        hedge_symbol=args.hedge_symbol,
-                        profit_threshold=args.profit_threshold,
-                        trend_threshold=args.trend_threshold,
-                        max_skew_limit=args.max_skew_limit,
-                        volatility_scale=args.volatility_scale
+                        enable_rebalance=enable_rebalance
                     )
                 else:
                     market_maker = PerpetualMarketMaker(
@@ -425,9 +372,8 @@ def main():
                         enable_database=args.enable_db,
                         enable_rebalance=enable_rebalance,
                         profit_threshold=args.profit_threshold,
-                        trend_threshold=args.trend_threshold,
-                        max_skew_limit=args.max_skew_limit,
-                        volatility_scale=args.volatility_scale
+                        volatility_ceiling=args.volatility_ceiling,
+                        trend_threshold=args.trend_threshold
                     )
 
                 if args.stop_loss is not None:
@@ -443,12 +389,10 @@ def main():
                         symbol=args.symbol,
                         base_spread_percentage=args.spread,
                         order_quantity=args.quantity,
-                        exchange=exchange,
+                            exchange=exchange,
                         exchange_config=exchange_config,
                         enable_database=args.enable_db,
-                        market_type='spot',
-                        hedge_client=hedge_client,
-                        hedge_symbol=args.hedge_symbol
+                        market_type='spot'
                     )
                 else:
                     logger.info("啟動現貨做市模式")
