@@ -13,7 +13,7 @@ services:
       "--market-type", "perp",
       "--symbol", "BTC-USD",
       "--strategy", "standard",
-      "--spread", "0.19",            # 黄金 9.5 bps 积分区 (单边)
+      "--spread", "0.18",            # 黄金 9.5 bps 积分区 (单边)
       "--quantity", "0.008",         # 单档 0.008 BTC
       "--max-orders", "1",           # 只挂一单，追求极致 Maker 积分
       "--inventory-skew", "1.5",     # 强化版偏移响应
