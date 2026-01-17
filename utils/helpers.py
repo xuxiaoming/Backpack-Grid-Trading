@@ -68,3 +68,21 @@ def calculate_volatility(prices: List[float], window: int = 20) -> float:
     recent_prices = prices[-window:]
     returns = np.diff(recent_prices) / recent_prices[:-1]
     return np.std(returns) * 100  # 轉換為百分比
+
+def calculate_atr(highs: List[float], lows: List[float], closes: List[float], window: int = 14) -> float:
+    """
+    計算平均真實波幅 (ATR)
+    """
+    if len(closes) < window + 1:
+        return 0
+    
+    tr_list = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i-1]),
+            abs(lows[i] - closes[i-1])
+        )
+        tr_list.append(tr)
+    
+    return float(np.mean(tr_list[-window:]))

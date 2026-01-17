@@ -13,14 +13,16 @@ services:
       "--market-type", "perp",
       "--symbol", "BTC-USD",
       "--strategy", "standard",
-      "--spread", "0.10",            # 黄金 10 bps 积分区
-      "--quantity", "0.003",         # 单档 0.003 BTC
-      "--max-orders", "6",           # 单边 6 档阶梯
+      "--spread", "0.19",            # 黄金 9.5 bps 积分区 (单边)
+      "--quantity", "0.008",         # 单档 0.008 BTC
+      "--max-orders", "1",           # 只挂一单，追求极致 Maker 积分
       "--inventory-skew", "1.5",     # 强化版偏移响应
       "--max-position", "0.06",      # 最大持仓 0.06
-      "--profit-threshold", "0.03",
+      "--profit-threshold", "0.0004", # 万四止盈加速
+      "--volatility-ceiling", "0.08", # 波动率熔断 (0.08%)
+      "--trend-threshold", "0.0008", # 趋势保护 (8 bps)
       "--target-position", "0",
-      "--interval", "6",
+      "--interval", "5",
       "--enable-rebalance",
       "--leverage", "6"
     ]
